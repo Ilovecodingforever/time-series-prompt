@@ -4,6 +4,18 @@ freeze all layers, do representation learning: https://github.com/moment-timeser
 
 goal: one model, prompt tuning on different tasks, all perform well: https://huggingface.co/docs/peft/en/conceptual_guides/prompting
 
+
+
+sotries:
+1. prompt tunine as a bridge:
+    - different tasks
+    - different variables
+
+
+
+
+
+
 huggingface: https://huggingface.co/docs/peft/main/en/task_guides/clm-prompt-tuning
 custom prompt:
 - https://github.com/mkshing/Prompt-Tuning/tree/master
@@ -77,21 +89,21 @@ os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+RANDOM_SEED = 0
 
 
 
 
 
-def prompt_tuning(model, train_loader, test_loader):
+def train(model, train_loader, test_loader,
+          # Gradient clipping value
+          max_norm = 5.0,
+          max_epoch = 10, max_lr = 1e-2
+          ):
     """
     prompt tuning
     """
-    # Gradient clipping value
-    max_norm = 5.0
 
-    max_epoch = 10
-
-    max_lr = 1e-2
     total_steps = len(train_loader) * max_epoch
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # Create a OneCycleLR scheduler
@@ -234,6 +246,7 @@ def inference(model, test_loader, criterion, cur_epoch):
 
                 y = batch_x
 
+
             else:
                 raise NotImplementedError
 
@@ -266,7 +279,8 @@ class SoftEmbedding(nn.Module):
                 # wte: nn.Embedding,
                 wte: nn.Module,
                 n_tokens: int = 10,
-                random_range: float = 0.5,):
+                random_range: float = 0.5,
+                hidden_size: int = 64):
         """appends learned embedding to
 
         Args:
@@ -279,12 +293,13 @@ class SoftEmbedding(nn.Module):
         self.wte = wte
         self.n_tokens = n_tokens
 
-        # reparametraize: https://arxiv.org/pdf/2101.00190
+        self.hidden_size = hidden_size
 
         size = wte.weight.size(0)
-        self.mlp = nn.Linear(64, size)
+        # reparametraize: https://arxiv.org/pdf/2101.00190
+        self.mlp = nn.Linear(self.hidden_size, size)
 
-        self.learned_embedding = nn.parameter.Parameter(self.initialize_embedding(64,
+        self.learned_embedding = nn.parameter.Parameter(self.initialize_embedding(self.hidden_size,
                                                                                 n_tokens,
                                                                                 random_range))
 
@@ -417,68 +432,52 @@ class MPT(nn.Module):
 
 
 
-def zero_shot(impute_model):
-
-    BATCH_SIZE = 50
-
-    n_tokens = 5
-
-    # Set random seeds for PyTorch, Numpy etc.
-    RANDOM_SEED = 0
-    control_randomness(seed=RANDOM_SEED)
-
-
-    train_dataset = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
-                                    task_name='imputation',
-                                    # data_stride_len=512
-                                    data_stride_len=1
-                                    )
-    train_loader_impute = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-    test_dataset = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
-                                   task_name='imputation',
-                                #    data_stride_len=512
-                                   data_stride_len=1
-                                   )
-    test_loader_impute = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-
+def zero_shot(impute_model, train_loader_impute, test_loader_impute):
 
     # need to freeze head manually
     for param in impute_model.head.parameters():
         param.requires_grad = False
 
-    impute_model = impute_model.to(DEVICE)
-
-    inference(impute_model, train_loader_impute, torch.nn.MSELoss(reduction='none').to(DEVICE), 'zero-shot')
+    inference(impute_model, test_loader_impute, torch.nn.MSELoss(reduction='none').to(DEVICE), 'zero-shot')
 
 
 
-def prompt_tuning(impute_model):
-    
-    BATCH_SIZE = 50
+
+def prompt_tuning(impute_model, train_loader_impute, test_loader_impute):
 
     n_tokens = 5
 
-    # Set random seeds for PyTorch, Numpy etc.
-    RANDOM_SEED = 0
-    control_randomness(seed=RANDOM_SEED)
+    # need to freeze head manually
+    for param in impute_model.parameters():
+        param.requires_grad = False
+
+    # n_tokens = 10
+    # random_range = 0.5
+    # forecasting_model_long.prompt = nn.parameter.Parameter(torch.FloatTensor(n_tokens, 1024).uniform_(-random_range, random_range))
+    # https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.get_input_embeddings
+    impute_model.patch_embedding.value_embedding = SoftEmbedding(impute_model.patch_embedding.value_embedding,
+                                                                    n_tokens=n_tokens,)
+
+    # print frozen params
+    for name, param in impute_model.named_parameters():
+        if param.requires_grad:
+            print(name)
+
+    train(impute_model, train_loader_impute, test_loader_impute)
 
 
-    train_dataset = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
-                                    task_name='imputation',
-                                    # data_stride_len=512
-                                    data_stride_len=1
-                                    )
-    train_loader_impute = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-    test_dataset = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
-                                   task_name='imputation',
-                                #    data_stride_len=512
-                                   data_stride_len=1
-                                   )
-    test_loader_impute = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+def full_fine_tune(impute_model, train_loader_impute, test_loader_impute):
 
+    for param in impute_model.parameters():
+        param.requires_grad = True
+
+    # print frozen params
+    for name, param in impute_model.named_parameters():
+        if param.requires_grad:
+            print(name)
+
+    train(impute_model, train_loader_impute, test_loader_impute)
 
 
 
@@ -487,8 +486,6 @@ def prompt_tuning(impute_model):
 
 def run_single_prompt():
 
-
-    # zero shot
     impute_model = MOMENTPipeline.from_pretrained(
         "AutonLab/MOMENT-1-large",
         # For imputation, we will load MOMENT in `reconstruction` mode
@@ -498,95 +495,35 @@ def run_single_prompt():
             'freeze_embedder': True, # Freeze the transformer encoder
             'freeze_head': True, # The linear forecasting head must be trained
             }
-    )
+    ).to(DEVICE)
 
     impute_model.init()
-    
-    
-    
 
+    # run experiment
+    experiment = zero_shot
 
-    BATCH_SIZE = 20
-
-    n_tokens = 5
-
-    # Set random seeds for PyTorch, Numpy etc.
-    RANDOM_SEED = 0
-    control_randomness(seed=RANDOM_SEED)
-
+    batch_size = 50
+    if experiment == full_fine_tune:
+        batch_size = 20
 
     train_dataset = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
                                     task_name='imputation',
                                     # data_stride_len=512
                                     data_stride_len=1
                                     )
-    train_loader_impute = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    train_loader_impute = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
 
     test_dataset = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
                                    task_name='imputation',
                                 #    data_stride_len=512
                                    data_stride_len=1
                                    )
-    test_loader_impute = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader_impute = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 
-    # full fine tune
-    impute_model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        # For imputation, we will load MOMENT in `reconstruction` mode
-        model_kwargs={
-            'task_name': 'reconstruction',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            }
-    )
-    impute_model.init()
-
-    # need to freeze head manually
-    for param in impute_model.parameters():
-        param.requires_grad = True
-
-    # print frozen params
-    for name, param in impute_model.named_parameters():
-        if param.requires_grad:
-            print(name)
-
-    impute_model = prompt_tuning(impute_model, train_loader_impute, test_loader_impute).to('cpu')
+    experiment(impute_model, train_loader_impute, test_loader_impute)
 
 
-
-
-    # imputation model
-    impute_model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        # For imputation, we will load MOMENT in `reconstruction` mode
-        model_kwargs={
-            'task_name': 'reconstruction',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            }
-    )
-    impute_model.init()
-
-    # need to freeze head manually
-    for param in impute_model.parameters():
-        param.requires_grad = False
-
-    impute_model.patch_embedding.value_embedding = SoftEmbedding(impute_model.patch_embedding.value_embedding,
-                                                                    n_tokens=n_tokens,)
-    # n_tokens = 10
-    # random_range = 0.5
-    # forecasting_model_long.prompt = nn.parameter.Parameter(torch.FloatTensor(n_tokens, 1024).uniform_(-random_range, random_range))
-    # https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.get_input_embeddings
-
-    # print frozen params
-    for name, param in impute_model.named_parameters():
-        if param.requires_grad:
-            print(name)
-
-    impute_model = prompt_tuning(impute_model, train_loader_impute, test_loader_impute).to('cpu')
 
 
 
@@ -671,6 +608,9 @@ def run_MPT():
 
 
 if __name__ == '__main__':
+
+    # Set random seeds for PyTorch, Numpy etc.
+    control_randomness(seed=RANDOM_SEED)
 
     run_single_prompt()
 
