@@ -455,8 +455,11 @@ def prompt_tuning(impute_model, train_loader_impute, test_loader_impute):
     # random_range = 0.5
     # forecasting_model_long.prompt = nn.parameter.Parameter(torch.FloatTensor(n_tokens, 1024).uniform_(-random_range, random_range))
     # https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.get_input_embeddings
-    impute_model.patch_embedding.value_embedding = SoftEmbedding(impute_model.patch_embedding.value_embedding,
-                                                                    n_tokens=n_tokens,)
+    setattr(impute_model.patch_embedding, 'value_embedding', SoftEmbedding(impute_model.patch_embedding.value_embedding,
+                                                                    n_tokens=n_tokens,))
+    
+    # impute_model.patch_embedding.value_embedding = SoftEmbedding(impute_model.patch_embedding.value_embedding,
+    #                                                                 n_tokens=n_tokens,)
 
     # print frozen params
     for name, param in impute_model.named_parameters():
@@ -500,7 +503,7 @@ def run_single_prompt():
     impute_model.init()
 
     # run experiment
-    experiment = zero_shot
+    experiment = prompt_tuning
 
     batch_size = 50
     if experiment == full_fine_tune:
