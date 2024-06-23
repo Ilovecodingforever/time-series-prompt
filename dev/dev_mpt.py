@@ -6,9 +6,11 @@ https://arxiv.org/pdf/2303.02861#page=5.10
 
 import os
 
+import wandb
+
 import numpy as np
 from tqdm import tqdm
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 # from sklearn.decomposition import PCA
 
 
@@ -20,25 +22,27 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from momentfm.utils.utils import control_randomness
 from momentfm.data.informer_dataset import InformerDataset
-# from momentfm.data.classification_dataset import ClassificationDataset
+from momentfm.data.classification_dataset import ClassificationDataset
 from momentfm.data.anomaly_detection_dataset import AnomalyDetectionDataset
 
 from momentfm.common import TASKS
 from momentfm import MOMENTPipeline
 from momentfm.utils.masking import Masking
-# from momentfm.utils.forecasting_metrics import get_forecasting_metrics
+from momentfm.models.statistical_classifiers import fit_svm
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 
+wandb.login()
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # DEVICE = "cpu"
 RANDOM_SEED = 0
 
-
+# Set random seeds for PyTorch, Numpy etc.
+control_randomness(seed=RANDOM_SEED)
 
 
 
@@ -51,6 +55,8 @@ def step(model, batch, criterion, mask_generator):
     loss = 0
 
     losses = {}
+
+    embedding = None
 
     if model.task_name == TASKS.RECONSTRUCTION:
         for key, data in batch.items():
@@ -69,6 +75,8 @@ def step(model, batch, criterion, mask_generator):
                 batch_x, batch_masks, _ = data
             elif key == 'imputation':
                 batch_x, batch_masks = data
+            elif key == 'classify':
+                batch_x, batch_masks, _ = data
             else:
                 raise NotImplementedError
 
@@ -86,14 +94,17 @@ def step(model, batch, criterion, mask_generator):
                 x=batch_x, input_mask=batch_masks).to(DEVICE).long()
 
             # Forward
-            output = model(batch_x, input_mask=batch_masks, mask=mask).reconstruction
+            output = model(batch_x, input_mask=batch_masks, mask=mask)
 
             # Compute loss
-            recon_loss = criterion(output, batch_x)
-            if key == 'anomaly':
+            recon_loss = criterion(output.reconstruction, batch_x)
+            if key in ('anomaly', 'classify'):
                 val = recon_loss.mean()
                 loss += val
                 losses[key] += val.detach().cpu().numpy()
+
+                if key == 'classify':
+                    embedding = output.embeddings
 
             elif key == 'imputation':
                 observed_mask = (batch_masks * (1 - mask))[:, None, :]
@@ -114,7 +125,7 @@ def step(model, batch, criterion, mask_generator):
         raise NotImplementedError
 
 
-    return loss, model, y, output, losses
+    return loss, model, y, output.reconstruction, losses, embedding
 
 
 
@@ -122,7 +133,7 @@ def step(model, batch, criterion, mask_generator):
 def train(model, train_loader, test_loader,
           # Gradient clipping value
           max_norm = 5.0,
-          max_epoch = 10, max_lr = 1e-2
+          max_epoch = 400, max_lr = 1e-2
           ):
     """
     prompt tuning
@@ -152,7 +163,7 @@ def train(model, train_loader, test_loader,
         loss_dicts = []
 
         for data in tqdm(train_loader, total=len(train_loader)):
-            loss, model, _, _, loss_dict = step(model, data, criterion, mask_generator)
+            loss, model, _, _, loss_dict, _ = step(model, data, criterion, mask_generator)
 
             # Scales the loss for mixed precision training
             scaler.scale(loss).backward()
@@ -174,44 +185,87 @@ def train(model, train_loader, test_loader,
 
         print(f"Epoch {cur_epoch}: Train loss: {average_loss:.3f}, Individual losses: {loss_dict}")
 
+        wandb.log({'train_loss': average_loss} | {'train_'+key+'_loss': val for key, val in loss_dict.items()},
+                  step=cur_epoch)
+
         # Step the learning rate scheduler
         scheduler.step()
 
         # Evaluate the model on the test split
-        model = inference(model, test_loader, criterion, cur_epoch, mask_generator)
-
+        model = inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader)
 
     return model
 
 
 
 
-def inference(model, test_loader, criterion, cur_epoch, mask_generator):
+def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader):
     """
     perform inference
     """
 
     trues, preds, losses, loss_dicts = [], [], [], []
+
+    train_embeddings, train_labels = [], []
+
     model.eval()
     with torch.no_grad():
         for data in tqdm(test_loader, total=len(test_loader)):
-            loss, model, y, output, loss_dict = step(model, data, criterion, mask_generator)
+            loss, model, y, output, loss_dict, embedding = step(model, data, criterion, mask_generator)
 
             losses.append(loss.item())
             trues.append(y.detach().cpu().numpy())
             preds.append(output.detach().cpu().numpy())
             loss_dicts.append(loss_dict)
 
+            # classification
+            if embedding is not None:
+                _, _, batch_labels = data['classify']
+                train_labels.append(batch_labels)
+                train_embeddings.append(embedding.detach().cpu().numpy())
+
     losses = np.array(losses)
     average_loss = np.average(losses)
-    loss_dict = {key: np.nanmean([d[key] if key in d.keys() else np.nan for d in loss_dicts]) for key in loss_dicts[0].keys()}
+    loss_dict = {key: np.nanmean([d[key] if key in d.keys() else np.nan for d in loss_dicts]) \
+        for key in loss_dicts[0].keys()}
 
-    model.train()
 
     print(f"Epoch {cur_epoch}: Test loss: {average_loss:.3f}, Individual losses: {loss_dict}")
 
-    trues = np.concatenate(trues, axis=0)
-    preds = np.concatenate(preds, axis=0)
+    # classification
+    if len(train_embeddings) > 0:
+
+        test_embeddings, test_labels = [], []
+
+        with torch.no_grad():
+            for data in tqdm(train_loader, total=len(train_loader)):
+                _, _, _, _, _, embedding = step(model, data, criterion, mask_generator)
+
+                # classification
+                if embedding is not None:
+                    _, _, batch_labels = data['classify']
+                    test_labels.append(batch_labels)
+                    test_embeddings.append(embedding.detach().cpu().numpy())
+
+        train_embeddings = np.concatenate(train_embeddings, axis=0)
+        test_embeddings = np.concatenate(test_embeddings, axis=0)
+        train_labels = np.concatenate(train_labels, axis=0)
+        test_labels = np.concatenate(test_labels, axis=0)
+
+        clf = fit_svm(features=train_embeddings, y=train_labels)
+        train_accuracy = clf.score(train_embeddings, train_labels)
+        test_accuracy = clf.score(test_embeddings, test_labels)
+
+        print(f"Train accuracy: {train_accuracy:.2f}, Test accuracy: {test_accuracy:.2f}")
+
+
+    model.train()
+
+    wandb.log({'test_loss': average_loss,
+               'train_accuracy': train_accuracy,
+               'test_accuracy': test_accuracy,
+               } | {'test_'+key+'_loss': val for key, val in loss_dict.items()},
+              step=cur_epoch)
 
     return model
 
@@ -358,7 +412,8 @@ def zero_shot(model, train_loader, test_loader):
     model = inference(model, test_loader,
                       torch.nn.MSELoss(reduction='none').to(DEVICE),
                       'zero-shot',
-                      Masking(mask_ratio=0.3))
+                      Masking(mask_ratio=0.3),
+                      train_loader)
 
     return model
 
@@ -369,13 +424,19 @@ def prompt_tuning(model, train_loader, test_loader, n_tokens=5):
     """
     prompt tuning
     """
+
+    wandb.init(
+        project="ts-prompt",
+        name="experiment_prompt_tuning",
+        )
+
     # need to freeze head manually
     for param in model.parameters():
         param.requires_grad = False
 
     setattr(model.patch_embedding, 'value_embedding',
             MPT(model.patch_embedding.value_embedding,
-                ['imputation', 'anomaly'],
+                next(iter(train_loader)).keys(),
                 n_tokens=n_tokens,))
 
     # print frozen params
@@ -385,6 +446,8 @@ def prompt_tuning(model, train_loader, test_loader, n_tokens=5):
 
     model = train(model, train_loader, test_loader)
 
+    wandb.finish()
+
     return model
 
 
@@ -392,6 +455,11 @@ def finetune(model, train_loader, test_loader):
     """
     finetune
     """
+
+    wandb.init(
+        project="ts-prompt",
+        name="experiment_finetune",
+        )
 
     for param in model.parameters():
         param.requires_grad = True
@@ -402,6 +470,8 @@ def finetune(model, train_loader, test_loader):
             print(name)
 
     model = train(model, train_loader, test_loader)
+
+    wandb.finish()
 
     return model
 
@@ -414,28 +484,39 @@ def get_data(batch_size):
     """
     train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
                                             task_name='imputation',
-                                            data_stride_len=1
-                                            # data_stride_len=512
+                                            # data_stride_len=1
+                                            data_stride_len=512
                                             )
     test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
                                             task_name='imputation',
-                                            data_stride_len=1
-                                            # data_stride_len=512
+                                            # data_stride_len=1
+                                            data_stride_len=512
                                             )
     train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
-                                                    data_stride_len=10
-                                                    # data_stride_len=512
+                                                    # data_stride_len=10
+                                                    data_stride_len=512
                                                     )
     test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
-                                                    data_stride_len=10
-                                                    # data_stride_len=512
+                                                    # data_stride_len=10
+                                                    data_stride_len=512
                                                     )
 
-    train_datasets = {'imputation':  train_dataset_impute, 'anomaly': train_dataset_anomaly}
+    train_dataset_classify = ClassificationDataset(data_split='train')
+    test_dataset_classify = ClassificationDataset(data_split='test')
+
+    train_datasets = {
+        'imputation':  train_dataset_impute,
+        'anomaly': train_dataset_anomaly,
+        'classify': train_dataset_classify
+                      }
     train_loader = DataLoader(CollectedDataset(train_datasets), batch_size=batch_size,
                               shuffle=False, collate_fn=collate_fn)
 
-    test_datasets = {'imputation':  test_dataset_impute, 'anomaly': test_dataset_anomaly}
+    test_datasets = {
+        'imputation':  test_dataset_impute,
+        'anomaly': test_dataset_anomaly,
+        'classify': test_dataset_classify
+        }
     test_loader = DataLoader(CollectedDataset(test_datasets), batch_size=batch_size,
                              shuffle=False, collate_fn=collate_fn)
 
@@ -462,11 +543,19 @@ def run_mpt():
     model.init()
 
 
-    experiment = prompt_tuning
+    experiment_name = 'prompt_tuning'
 
     batch_size = 50
-    if experiment == finetune:
+    if experiment_name == 'zero_shot':
+        experiment = zero_shot
+    elif experiment_name == 'finetune':
+        experiment = finetune
         batch_size = 10
+    elif experiment_name == 'prompt_tuning':
+        experiment = prompt_tuning
+    else:
+        raise NotImplementedError
+
 
     train_loader, test_loader = get_data(batch_size)
 
@@ -476,7 +565,5 @@ def run_mpt():
 
 
 if __name__ == '__main__':
-    # Set random seeds for PyTorch, Numpy etc.
-    control_randomness(seed=RANDOM_SEED)
 
     run_mpt()
