@@ -264,7 +264,7 @@ if __name__ == "__main__":
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
             'prefix-tuning': True,
-            'd_model': 768
+            # 'd_model': 768
             }
     ).to(DEVICE)
     model.init()
