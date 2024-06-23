@@ -6,8 +6,6 @@ https://arxiv.org/pdf/2303.02861#page=5.10
 
 import os
 
-import wandb
-
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -19,6 +17,8 @@ import torch.nn as nn
 import torch.cuda.amp
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import OneCycleLR
+
+import wandb
 
 from momentfm.utils.utils import control_randomness
 from momentfm.data.informer_dataset import InformerDataset
@@ -53,9 +53,7 @@ def step(model, batch, criterion, mask_generator):
     """
 
     loss = 0
-
     losses = {}
-
     embedding = None
 
     if model.task_name == TASKS.RECONSTRUCTION:
@@ -199,13 +197,13 @@ def train(model, train_loader, test_loader,
 
 
 
-def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader):
+def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,
+              log=True):
     """
     perform inference
     """
 
     trues, preds, losses, loss_dicts = [], [], [], []
-
     train_embeddings, train_labels = [], []
 
     model.eval()
@@ -229,10 +227,11 @@ def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_lo
     loss_dict = {key: np.nanmean([d[key] if key in d.keys() else np.nan for d in loss_dicts]) \
         for key in loss_dicts[0].keys()}
 
-
     print(f"Epoch {cur_epoch}: Test loss: {average_loss:.3f}, Individual losses: {loss_dict}")
 
     # classification
+    train_accuracy = None
+    test_accuracy = None
     if len(train_embeddings) > 0:
 
         test_embeddings, test_labels = [], []
@@ -259,13 +258,14 @@ def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_lo
         print(f"Train accuracy: {train_accuracy:.2f}, Test accuracy: {test_accuracy:.2f}")
 
 
-    model.train()
+    if log:
+        wandb.log({'test_loss': average_loss,
+                'train_accuracy': train_accuracy,
+                'test_accuracy': test_accuracy,
+                } | {'test_'+key+'_loss': val for key, val in loss_dict.items()},
+                step=cur_epoch)
 
-    wandb.log({'test_loss': average_loss,
-               'train_accuracy': train_accuracy,
-               'test_accuracy': test_accuracy,
-               } | {'test_'+key+'_loss': val for key, val in loss_dict.items()},
-              step=cur_epoch)
+    model.train()
 
     return model
 
@@ -413,7 +413,8 @@ def zero_shot(model, train_loader, test_loader):
                       torch.nn.MSELoss(reduction='none').to(DEVICE),
                       'zero-shot',
                       Masking(mask_ratio=0.3),
-                      train_loader)
+                      train_loader,
+                      log=False,)
 
     return model
 
@@ -484,21 +485,21 @@ def get_data(batch_size):
     """
     train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
                                             task_name='imputation',
-                                            # data_stride_len=1
-                                            data_stride_len=512
+                                            data_stride_len=1
+                                            # data_stride_len=512
                                             )
     test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
                                             task_name='imputation',
-                                            # data_stride_len=1
-                                            data_stride_len=512
+                                            data_stride_len=1
+                                            # data_stride_len=512
                                             )
     train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
-                                                    # data_stride_len=10
-                                                    data_stride_len=512
+                                                    data_stride_len=10
+                                                    # data_stride_len=512
                                                     )
     test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
-                                                    # data_stride_len=10
-                                                    data_stride_len=512
+                                                    data_stride_len=10
+                                                    # data_stride_len=512
                                                     )
 
     train_dataset_classify = ClassificationDataset(data_split='train')
