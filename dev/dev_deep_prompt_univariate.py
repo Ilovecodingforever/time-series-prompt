@@ -493,7 +493,7 @@ def finetune(train_loader, test_loader):
 
 if __name__ == "__main__":
 
-    wandb.init(mode="disabled") 
+    # wandb.init(mode="disabled") 
     experiment_name = 'prompt_tuning'
 
     batch_size = 10
