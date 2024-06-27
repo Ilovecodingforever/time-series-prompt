@@ -15,11 +15,11 @@ https://github.com/allenai/better-promptability/blob/5cb1e33c9988f6f973e92a1c78d
 
 TODO:
 
+- check if pretrained moment T5 weights are loaded for prompt tuning
 - need one deep prompt for each dataset, if #channels is different
     - what can you do if #channels is different?
 
 
-- have all layers share one prompt projection
 - now only works with 1 batch size
 - classify test data strangely long
 - run experiments with original moment, single task, finetune
@@ -49,7 +49,7 @@ from momentfm.utils.masking import Masking
 from momentfm.models.statistical_classifiers import fit_svm
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -109,7 +109,7 @@ def step(model, batch, criterion, mask_generator,):
             batch_masks = batch_masks[:, 0, :]
 
             # Forward
-            output = model(batch_x, input_mask=batch_masks, mask=mask,)
+            output = model(batch_x, input_mask=batch_masks, mask=mask, task_name=key)
 
             # Compute loss
             recon_loss = criterion(output.reconstruction, batch_x)
@@ -148,7 +148,7 @@ def step(model, batch, criterion, mask_generator,):
             forecast = forecast.float().to(DEVICE)
 
             with torch.cuda.amp.autocast():
-                output = model(timeseries, input_mask)
+                output = model(timeseries, input_mask, task_name=key)
 
             val = criterion(output.forecast, forecast).mean()
             loss += val
@@ -430,7 +430,7 @@ def zero_shot(train_loader, test_loader):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'prefix-tuning': False,
+            'prefix_tuning': False,
             'forecast_horizon': 196,
             # not used
             'n_channels': 1,
@@ -459,14 +459,16 @@ def zero_shot(train_loader, test_loader):
 
 
 
-def prompt_tuning(train_loader, test_loader):
+def prompt_tuning(train_loader, test_loader, name='',
+                  prefix_tuning_multi=False,
+                  MPT=False,):
     """
     prompt tuning
     """
 
     wandb.init(
         project="ts-prompt",
-        name="multivariate_deep_prompt_tuning",
+        name="multivariate_deep_prompt_tuning" + name,
     )
 
     # imputation model
@@ -478,15 +480,26 @@ def prompt_tuning(train_loader, test_loader):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'prefix-tuning': True,
-            'prefix-tuning-multi': True,
             'forecast_horizon': 196,
-            # not used
-            'n_channels': 1,
-            'num_class': 5
+            # 'prefix_tuning': True,
+            'prefix_tuning_multi': prefix_tuning_multi,
+            'MPT': MPT,
+            'num_prefix': 16,
+            'task_names': list(next(iter(train_loader)).keys()),
             }
     ).to(DEVICE)
     model.init()
+    
+    # check model weights loaded correctly
+    # from transformers import T5Config, T5EncoderModel, T5Model
+    # transformer_backbone = T5EncoderModel.from_pretrained(
+    #     "google/flan-t5-large"
+    # )
+    # transformer_backbone = transformer_backbone.get_encoder()
+    # for name, param in model.named_parameters():
+    #     if name in transformer_backbone.state_dict().keys():
+    #         assert(not torch.equal(param, transformer_backbone.state_dict()[name]))
+
 
     # need to freeze head manually
     for name, param in model.named_parameters():
@@ -508,7 +521,7 @@ def prompt_tuning(train_loader, test_loader):
 
 
 
-def finetune(train_loader, test_loader):
+def finetune(train_loader, test_loader, name='', **kwargs):
     """
     finetune
     """
@@ -526,12 +539,12 @@ def finetune(train_loader, test_loader):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'prefix-tuning': False,
-            'prefix-tuning-multi': False,
             'forecast_horizon': 196,
-            # not used
-            'n_channels': 1,
-            'num_class': 5
+            # 'prefix_tuning': False,
+            # 'prefix_tuning_multi': False,
+            # 'MPT': True,
+            'num_prefix': 2,
+            'task_names': list(next(iter(train_loader)).keys()),
             }
     ).to(DEVICE)
     model.init()
@@ -554,9 +567,15 @@ def finetune(train_loader, test_loader):
 
 
 if __name__ == "__main__":
-    os.environ["WANDB_MODE"] = "offline"
+    # os.environ["WANDB_MODE"] = "offline"
 
-    EXPERIMENT_NAME = 'prompt_tuning'
+    EXPERIMENT_NAME = 'finetune'
+    
+    multitask = True
+    multivariable = True
+    
+    name = ''
+
 
     if EXPERIMENT_NAME == 'zero_shot':
         experiment = zero_shot
@@ -564,10 +583,29 @@ if __name__ == "__main__":
         experiment = finetune
     elif EXPERIMENT_NAME == 'prompt_tuning':
         experiment = prompt_tuning
+        name = f'_multitask_{multitask}_multivariable_{multivariable}'
     else:
         raise NotImplementedError
 
 
     train_loader, test_loader = get_data(batch_size=1)
 
-    model = experiment(train_loader, test_loader)
+    model = experiment(train_loader, test_loader, name,
+                       prefix_tuning_multi=multivariable,
+                       MPT=multitask,
+                       )
+
+
+
+"""
+experiments:
+1. zero-shot
+2. finetune
+    - all tasks
+    - (one for each task probably tasks a long time)
+3. prompt tuning
+    - multitask only
+    - multi variable only
+    - multitask and multi variable
+
+"""
