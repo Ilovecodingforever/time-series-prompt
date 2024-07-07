@@ -26,14 +26,19 @@ from momentfm.data.classification_dataset import ClassificationDataset
 from momentfm.data.anomaly_detection_dataset import AnomalyDetectionDataset
 
 from momentfm.common import TASKS
-from momentfm import MOMENTPipeline
 from momentfm.utils.masking import Masking
 from momentfm.models.statistical_classifiers import fit_svm
 
+# from momentfm.models.moment import MPT
+from momentfm.models.moment_mpt import MOMENTPipeline_mpt
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
+
+
+os.environ["WANDB_MODE"] = "offline"
 
 wandb.login()
 
@@ -91,8 +96,27 @@ def step(model, batch, criterion, mask_generator):
             mask = mask_generator.generate_mask(
                 x=batch_x, input_mask=batch_masks).to(DEVICE).long()
 
+
+            # Reshape to [batch_size * n_channels, 1, window_size]
+            # batch_x = batch_x.reshape((-1, 1, 512)).to(DEVICE).float()
+            batch_x = batch_x.to(DEVICE).float()
+
+            batch_masks = batch_masks.to(DEVICE).long()
+            batch_masks = batch_masks[:, None, :].repeat(1, n_channels, 1)
+
+            # Randomly mask some patches of data
+            # 0 is masked
+            mask = mask_generator.generate_mask(
+                x=batch_x.reshape(-1, 1, 512),
+                input_mask=batch_masks.reshape(-1, 512)).to(DEVICE).long()
+            # mask = mask.reshape(-1, n_channels, 512)
+            mask = mask.reshape(-1, n_channels, 512)[:, 0, :] # TODO: is mask 2D or 3D?
+            batch_masks = batch_masks[:, 0, :]
+
+
+
             # Forward
-            output = model(batch_x, input_mask=batch_masks, mask=mask)
+            output = model(batch_x, input_mask=batch_masks, mask=mask, task_name=key)
 
             # Compute loss
             recon_loss = criterion(output.reconstruction, batch_x)
@@ -483,27 +507,29 @@ def get_data(batch_size):
     """
     get data
     """
+    # TODO: change stride
     train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
                                             task_name='imputation',
-                                            data_stride_len=1
+                                            data_stride_len=15
                                             # data_stride_len=512
                                             )
     test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
                                             task_name='imputation',
-                                            data_stride_len=1
+                                            data_stride_len=15
                                             # data_stride_len=512
                                             )
     train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
-                                                    data_stride_len=10
+                                                    data_stride_len=100
                                                     # data_stride_len=512
                                                     )
     test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
-                                                    data_stride_len=10
+                                                    data_stride_len=100
                                                     # data_stride_len=512
                                                     )
 
     train_dataset_classify = ClassificationDataset(data_split='train')
     test_dataset_classify = ClassificationDataset(data_split='test')
+
 
     train_datasets = {
         'imputation':  train_dataset_impute,
@@ -530,23 +556,9 @@ def run_mpt():
     run MPT
     """
 
-    # imputation model
-    model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        # For imputation, we will load MOMENT in `reconstruction` mode
-        model_kwargs={
-            'task_name': 'reconstruction',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            }
-    ).to(DEVICE)
-    model.init()
-
-
     experiment_name = 'prompt_tuning'
 
-    batch_size = 50
+    batch_size = 10
     if experiment_name == 'zero_shot':
         experiment = zero_shot
     elif experiment_name == 'finetune':
@@ -559,6 +571,28 @@ def run_mpt():
 
 
     train_loader, test_loader = get_data(batch_size)
+
+
+    # imputation model
+    model = MOMENTPipeline_mpt.from_pretrained(
+        "AutonLab/MOMENT-1-large",
+        # For imputation, we will load MOMENT in `reconstruction` mode
+        model_kwargs={
+            'task_name': 'reconstruction',
+            'freeze_encoder': False, # Freeze the patch embedding layer
+            'freeze_embedder': False, # Freeze the transformer encoder
+            'freeze_head': False, # The linear forecasting head must be trained
+            'forecast_horizon': 196,
+            # 'prefix_tuning': True,
+            'prefix_tuning_multi': False,
+            'MPT': False,
+            'num_prefix': 5,
+            'task_names': list(next(iter(train_loader)).keys()),            
+            }
+    ).to(DEVICE)
+    model.init()
+
+
 
     model = experiment(model, train_loader, test_loader)
 

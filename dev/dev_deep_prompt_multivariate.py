@@ -14,10 +14,27 @@ https://github.com/allenai/better-promptability/blob/5cb1e33c9988f6f973e92a1c78d
 
 
 TODO:
+- does it make sense to flatten the data to train deep prompt?
+    - time dimension gets flattened too (#patches)
+- should I exclude the MPT when training the deep prompt?
 
-- check if pretrained moment T5 weights are loaded for prompt tuning
+
 - need one deep prompt for each dataset, if #channels is different
     - what can you do if #channels is different?
+    - just add them up?
+    - train one layer for each dataset, project into the same space
+    - lora-like: u_i * v
+    - RNN, flip channel and time dimension
+- solution: flip channel and time dimension, subsample time dimension to the same size (maybe 16)
+    - do attention block
+
+
+
+
+- did flattening and not flattening give similar performance? why?
+
+- can we draw semantic meaning from the prompt?
+
 
 
 - now only works with 1 batch size
@@ -49,7 +66,7 @@ from momentfm.utils.masking import Masking
 from momentfm.models.statistical_classifiers import fit_svm
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -91,6 +108,7 @@ def step(model, batch, criterion, mask_generator,):
                 raise NotImplementedError
 
             n_channels = batch_x.shape[1]
+
 
             # Reshape to [batch_size * n_channels, 1, window_size]
             # batch_x = batch_x.reshape((-1, 1, 512)).to(DEVICE).float()
@@ -349,62 +367,61 @@ def collate_fn(batch):
 
 
 
-def get_data(batch_size):
+def get_data(batch_size, dataset_names):
     """
     get data
     """
-    train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
-                                            task_name='imputation',
-                                            data_stride_len=15
-                                            # data_stride_len=512
-                                            )
-    test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
-                                            task_name='imputation',
-                                            data_stride_len=15
-                                            # data_stride_len=512
-                                            )
-    train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
-                                                    data_stride_len=100
-                                                    # data_stride_len=512
-                                                    )
-    test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
-                                                    data_stride_len=100
-                                                    # data_stride_len=512
-                                                    )
 
-    train_dataset_classify = ClassificationDataset(data_split='train')
-    test_dataset_classify = ClassificationDataset(data_split='test')
+    train_datasets = {}
+    test_datasets = {}
+    if 'imputation' in dataset_names:
+        train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
+                                                task_name='imputation',
+                                                data_stride_len=15
+                                                # data_stride_len=512
+                                                )
+        test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
+                                                task_name='imputation',
+                                                data_stride_len=15
+                                                # data_stride_len=512
+                                                )
+        train_datasets['imputation'] = train_dataset_impute
+        test_datasets['imputation'] = test_dataset_impute
 
+    if 'anomaly' in dataset_names:
+        train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
+                                                        data_stride_len=100
+                                                        # data_stride_len=512
+                                                        )
+        test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
+                                                        data_stride_len=100
+                                                        # data_stride_len=512
+                                                        )
+        train_datasets['anomaly'] = train_dataset_anomaly
+        test_datasets['anomaly'] = test_dataset_anomaly
 
-    train_dataset_forecast_long = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
-                                                    forecast_horizon=196,
-                                                    data_stride_len=15
-                                                    )
-    test_dataset_forecast_long = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
-                                                    forecast_horizon=196,
-                                                    data_stride_len=15
-                                                    )
+    if 'classify' in dataset_names:
+        train_dataset_classify = ClassificationDataset(data_split='train')
+        test_dataset_classify = ClassificationDataset(data_split='test')
+        train_datasets['classify'] = train_dataset_classify
+        test_datasets['classify'] = test_dataset_classify
 
-    train_datasets = {
-        'imputation':  train_dataset_impute,
-        # 'anomaly': train_dataset_anomaly,
-        # 'classify': train_dataset_classify,
-        'forecasting_long': train_dataset_forecast_long,
-        # 'forecasting_short': train_dataset_forecast_short,
-                      }
+    if 'forecasting_long' in dataset_names:
+        train_dataset_forecast_long = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
+                                                        forecast_horizon=196,
+                                                        data_stride_len=15
+                                                        )
+        test_dataset_forecast_long = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
+                                                        forecast_horizon=196,
+                                                        data_stride_len=15
+                                                        )
+        train_datasets['forecasting_long'] = train_dataset_forecast_long
+        test_datasets['forecasting_long'] = test_dataset_forecast_long
 
     data = CollectedDataset(train_datasets)
     train_loader = DataLoader(data, batch_size=batch_size, shuffle=False,
                               collate_fn=collate_fn
                               )
-
-    test_datasets = {
-        'imputation':  test_dataset_impute,
-        # 'anomaly': test_dataset_anomaly,
-        # 'classify': test_dataset_classify,
-        'forecasting_long': test_dataset_forecast_long,
-        # 'forecasting_short': test_dataset_forecast_short,
-        }
 
     data = CollectedDataset(test_datasets)
     test_loader = DataLoader(data, batch_size=batch_size, shuffle=False,
@@ -416,9 +433,10 @@ def get_data(batch_size):
 
 
 
-def zero_shot(train_loader, test_loader):
+def zero_shot(train_loader, test_loader, name='', **kwargs):
     """
     zero shot
+    TODO: cannot do this with forecasting, because head not pretrained
     """
 
     # imputation model
@@ -430,11 +448,12 @@ def zero_shot(train_loader, test_loader):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'prefix_tuning': False,
             'forecast_horizon': 196,
-            # not used
-            'n_channels': 1,
-            'num_class': 5
+            # 'prefix_tuning': False,
+            # 'prefix_tuning_multi': False,
+            # 'MPT': True,
+            'num_prefix': 2,
+            'task_names': list(next(iter(train_loader)).keys()),
             }
     ).to(DEVICE)
     model.init()
@@ -474,6 +493,7 @@ def prompt_tuning(train_loader, test_loader, name='',
     # imputation model
     model = MOMENTPipeline.from_pretrained(
         "AutonLab/MOMENT-1-large",
+        # output_loading_info=True,
         # For imputation, we will load MOMENT in `reconstruction` mode
         model_kwargs={
             'task_name': 'reconstruction',
@@ -486,24 +506,15 @@ def prompt_tuning(train_loader, test_loader, name='',
             'MPT': MPT,
             'num_prefix': 16,
             'task_names': list(next(iter(train_loader)).keys()),
+            'multivariate_projection': 'attention',
             }
     ).to(DEVICE)
     model.init()
-    
-    # check model weights loaded correctly
-    # from transformers import T5Config, T5EncoderModel, T5Model
-    # transformer_backbone = T5EncoderModel.from_pretrained(
-    #     "google/flan-t5-large"
-    # )
-    # transformer_backbone = transformer_backbone.get_encoder()
-    # for name, param in model.named_parameters():
-    #     if name in transformer_backbone.state_dict().keys():
-    #         assert(not torch.equal(param, transformer_backbone.state_dict()[name]))
 
 
     # need to freeze head manually
     for name, param in model.named_parameters():
-        if 'prefix' not in name and 'prompt' not in name:
+        if 'prefix' not in name and 'prompt' not in name and 'fore_head' not in name and 'mpt' not in name:
             param.requires_grad = False
 
     # print frozen params
@@ -569,14 +580,17 @@ def finetune(train_loader, test_loader, name='', **kwargs):
 if __name__ == "__main__":
     # os.environ["WANDB_MODE"] = "offline"
 
-    EXPERIMENT_NAME = 'finetune'
-    
+    EXPERIMENT_NAME = 'prompt_tuning'
+
     multitask = True
     multivariable = True
-    
+
+    dataset_names = ['imputation', 'forecasting_long']
+
+    if not multitask and not multivariable and EXPERIMENT_NAME == 'prompt_tuning':
+        dataset_names = ['forecasting_long']
+
     name = ''
-
-
     if EXPERIMENT_NAME == 'zero_shot':
         experiment = zero_shot
     elif EXPERIMENT_NAME == 'finetune':
@@ -588,7 +602,7 @@ if __name__ == "__main__":
         raise NotImplementedError
 
 
-    train_loader, test_loader = get_data(batch_size=1)
+    train_loader, test_loader = get_data(batch_size=1, dataset_names=dataset_names)
 
     model = experiment(train_loader, test_loader, name,
                        prefix_tuning_multi=multivariable,
@@ -603,6 +617,7 @@ experiments:
 2. finetune
     - all tasks
     - (one for each task probably tasks a long time)
+        - TODO: should compare to this, since this is the use case
 3. prompt tuning
     - multitask only
     - multi variable only
