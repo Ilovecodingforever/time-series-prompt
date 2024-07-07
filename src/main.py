@@ -65,7 +65,7 @@ import torch
 
 from momentfm.utils.utils import control_randomness
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 
@@ -86,19 +86,19 @@ if __name__ == "__main__":
     from experiments import zero_shot, finetune, prompt_tuning
 
 
-    os.environ["WANDB_MODE"] = "offline"
+    # os.environ["WANDB_MODE"] = "offline"
 
-    EXPERIMENT_NAME = 'prompt_tuning'
+    EXPERIMENT_NAME = 'finetune'
 
     multitask = True
     multivariable = True
 
-    dataset_names = ['imputation', 'forecasting_long']
+    dataset_names = ['imputation', 'anomaly', 'classify', 'forecasting_long']
 
-    if not multitask and not multivariable and EXPERIMENT_NAME == 'prompt_tuning':
-        dataset_names = ['forecasting_long']
+    # if not multitask and not multivariable and EXPERIMENT_NAME == 'prompt_tuning':
+    #     dataset_names = ['forecasting_long']
 
-    batch_size = 16
+    batch_size = 8
 
     name = ''
     if EXPERIMENT_NAME == 'zero_shot':
