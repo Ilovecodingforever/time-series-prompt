@@ -1,6 +1,7 @@
 """
 train model
 """
+from copy import deepcopy
 
 import numpy as np
 from tqdm import tqdm
@@ -14,6 +15,9 @@ from momentfm.common import TASKS
 from momentfm.utils.masking import Masking
 from momentfm.models.statistical_classifiers import fit_svm
 
+from momentfm.utils.forecasting_metrics import get_forecasting_metrics
+from momentfm.utils.anomaly_detection_metrics import adjbestf1
+
 from main import DEVICE
 
 
@@ -25,6 +29,7 @@ def step(model, batch, criterion, mask_generator,):
 
     loss = 0
     losses = {}
+    xs, ys = {}, {}
     embedding = None
 
     for key, data in batch.items():
@@ -39,11 +44,11 @@ def step(model, batch, criterion, mask_generator,):
                 losses[key] = 0
 
             if key == 'anomaly':
-                batch_x, batch_masks, _ = data
+                batch_x, batch_masks, labels = data
             elif key == 'imputation':
                 batch_x, batch_masks = data
             elif key == 'classify':
-                batch_x, batch_masks, _ = data
+                batch_x, batch_masks, labels = data
             else:
                 raise NotImplementedError
 
@@ -79,8 +84,19 @@ def step(model, batch, criterion, mask_generator,):
                 if key == 'classify':
                     embedding = output.embeddings
 
+                    x = embedding.detach().cpu().numpy()
+                    y = labels.detach().cpu().numpy()
+
+                elif key == 'anomaly':
+                    x = output.reconstruction.detach().cpu().numpy()
+                    y = labels.detach().cpu().numpy()
+
+                else:
+                    raise NotImplementedError
+
+
             elif key == 'imputation':
-                observed_mask = (batch_masks * (1 - mask))[:, None, :].repeat(1, n_channels, 1)
+                observed_mask = (batch_masks * (1 - mask))[:, None, :].repeat(1, n_channels, 1)  # mask: 0 not observed, 1 observed?
                 assert observed_mask.shape == recon_loss.shape
                 masked_loss = observed_mask * recon_loss
 
@@ -88,11 +104,11 @@ def step(model, batch, criterion, mask_generator,):
                 loss += val
                 losses[key] += val.detach().cpu().numpy()
 
+                x = output.reconstruction[observed_mask == 1].detach().cpu().numpy()
+                y = batch_x[observed_mask == 1].detach().cpu().numpy()
+
             else:
                 raise NotImplementedError
-
-
-            y = batch_x
 
 
         elif key in ('forecasting_short', 'forecasting_long'):
@@ -112,12 +128,73 @@ def step(model, batch, criterion, mask_generator,):
             loss += val
             losses[key] = val.detach().cpu().numpy()
 
+            x = output.forecast.detach().cpu().numpy()
+            y = forecast.detach().cpu().numpy()
 
         else:
             raise NotImplementedError
 
 
-    return loss, model, losses, embedding
+
+    return loss, model, losses, xs, ys
+
+
+
+def evaluate(model, loader, criterion, mask_generator, clf=None):
+
+    model.eval()
+
+    performances = {}
+
+    for task in loader.dataset.tasks:
+        if isinstance(loader.dataset, torch.utils.data.IterableDataset):
+            loader.dataset.reset()
+            it = tqdm(loader)
+        else:
+            it = tqdm(loader, total=len(loader))
+
+        xs, ys = [], []
+
+        with torch.no_grad():
+            for data in it:
+                _, _, _, x, y = step(model, data[task], criterion, mask_generator,)
+                xs.append(x)
+                ys.append(y)
+
+
+        xs = np.concatenate(xs, axis=0)
+        ys = np.concatenate(ys, axis=0)
+
+        if task == 'classify':
+            if clf is None:
+                clf = fit_svm(features=xs, y=ys)
+            acc = clf.score(xs, ys)
+            performances[task] = {
+                'accuracy': acc,
+            }
+        elif task == 'anomaly':
+            # TODO: anomaly performance, VUS ROC
+            # https://github.com/TheDatumOrg/VUS
+            performances[task] = {
+                'adj F1': adjbestf1(ys, xs) # TODO: is this correct?
+            }
+        elif task in ('imputation', 'forecasting_long'):
+            p = get_forecasting_metrics(ys, xs)
+            performances[task] = {
+                'mse': p['mse'],
+                'mae': p['mae'],
+            }
+        elif task == 'forecasting_short':
+            p = get_forecasting_metrics(ys, xs)
+            performances[task] = {
+                'smape': p['smape'],
+            }
+        else:
+            raise NotImplementedError
+
+    return performances, clf
+
+
 
 
 
@@ -131,10 +208,12 @@ def train(model, train_loader, test_loader,
     prompt tuning
     """
 
-    total_steps = len(train_loader) * max_epoch
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    # Create a OneCycleLR scheduler
-    scheduler = OneCycleLR(optimizer, max_lr=max_lr, total_steps=total_steps, pct_start=0.3)
+    scheduler = None
+    if not isinstance(train_loader.dataset, torch.utils.data.IterableDataset):
+        # Create a OneCycleLR scheduler
+        total_steps = len(train_loader) * max_epoch
+        scheduler = OneCycleLR(optimizer, max_lr=max_lr, total_steps=total_steps, pct_start=0.3)
 
     # the tutourial is wrong
     # criterion = torch.nn.MSELoss().to(DEVICE)
@@ -154,8 +233,16 @@ def train(model, train_loader, test_loader,
         losses = []
         loss_dicts = []
 
-        for data in tqdm(train_loader, total=len(train_loader)):
-            loss, model, loss_dict, _ = step(model, data, criterion, mask_generator,)
+        if isinstance(train_loader.dataset, torch.utils.data.IterableDataset):
+            train_loader.dataset.reset()
+            test_loader.dataset.reset()
+            it = tqdm(train_loader)
+        else:
+            it = tqdm(train_loader, total=len(train_loader))
+
+        n_b = 0
+        for data in it:
+            loss, model, loss_dict, _, _ = step(model, data, criterion, mask_generator,)
 
             # Scales the loss for mixed precision training
             scaler.scale(loss).backward()
@@ -170,6 +257,12 @@ def train(model, train_loader, test_loader,
 
             losses.append(loss.item())
             loss_dicts.append(loss_dict)
+
+            n_b += 1
+
+            # if n_b  == 10:
+            #     break
+
 
         losses = np.array(losses)
         average_loss = np.average(losses)
@@ -186,8 +279,10 @@ def train(model, train_loader, test_loader,
                   step=cur_epoch)
 
 
+
         # Step the learning rate scheduler
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
 
         # Evaluate the model on the test split
         model = inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,)
@@ -204,11 +299,21 @@ def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_lo
     """
 
     trues, preds, losses, loss_dicts = [], [], [], []
-    train_embeddings, train_labels = [], []
+    test_embeddings, test_labels = [], []
 
     model.eval()
+
+    if isinstance(test_loader.dataset, torch.utils.data.IterableDataset):
+        train_loader.dataset.reset()
+        test_loader.dataset.reset()
+        it = tqdm(test_loader)
+    else:
+        it = tqdm(test_loader, total=len(test_loader))
+
+    n_b = 0
     with torch.no_grad():
-        for data in tqdm(test_loader, total=len(test_loader)):
+        for data in test_loader:
+            n_b += 1
             loss, model, loss_dict, embedding = step(model, data, criterion, mask_generator,)
 
             losses.append(loss.item())
@@ -217,9 +322,11 @@ def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_lo
             # classification
             if embedding is not None:
                 _, _, batch_labels = data['classify']
-                train_labels.append(batch_labels)
-                train_embeddings.append(embedding.detach().cpu().numpy())
+                test_labels.append(batch_labels)
+                test_embeddings.append(embedding.detach().cpu().numpy())
 
+            # if n_b  == 10:
+            #     break
 
     losses = np.array(losses)
     average_loss = np.average(losses)
@@ -227,24 +334,31 @@ def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_lo
         for key in loss_dicts[0].keys()}
 
     print(f"Epoch {cur_epoch}: Test loss: {average_loss:.3f}, Individual losses: {loss_dict}")
+    print(n_b, 'batches')
 
 
     # classification
     train_accuracy = None
     test_accuracy = None
-    if len(train_embeddings) > 0:
+    if len(test_embeddings) > 0:
 
-        test_embeddings, test_labels = [], []
+        train_embeddings, train_labels = [], []
+        if isinstance(train_loader.dataset, torch.utils.data.IterableDataset):
+            train_loader.dataset.reset()
+            test_loader.dataset.reset()
+            it = tqdm(train_loader)
+        else:
+            it = tqdm(train_loader, total=len(train_loader))
 
         with torch.no_grad():
-            for data in tqdm(train_loader, total=len(train_loader)):
+            for data in it:
                 _, _, _, embedding = step(model, data, criterion, mask_generator)
 
                 # classification
                 if embedding is not None:
                     _, _, batch_labels = data['classify']
-                    test_labels.append(batch_labels)
-                    test_embeddings.append(embedding.detach().cpu().numpy())
+                    train_labels.append(batch_labels)
+                    train_embeddings.append(embedding.detach().cpu().numpy())
 
         train_embeddings = np.concatenate(train_embeddings, axis=0)
         test_embeddings = np.concatenate(test_embeddings, axis=0)
@@ -256,7 +370,6 @@ def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_lo
         test_accuracy = clf.score(test_embeddings, test_labels)
 
         print(f"Train accuracy: {train_accuracy:.2f}, Test accuracy: {test_accuracy:.2f}")
-
 
     if log:
         wandb.log({'test_loss': average_loss,

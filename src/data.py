@@ -2,15 +2,24 @@
 get data loaders
 """
 
+import math
+import glob
+from typing import Dict, Any, Optional, List, Callable
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 import torch
 from torch.utils.data import DataLoader
 
+from momentfm.utils.data import load_from_tsfile
 from momentfm.data.informer_dataset import InformerDataset
 from momentfm.data.classification_dataset import ClassificationDataset
 from momentfm.data.anomaly_detection_dataset import AnomalyDetectionDataset
 
 from main import RANDOM_SEED
+from datasets import InformerDatasetMultiFile, ClassificationDatasetMultiFile, AnomalyDetectionDatasetMultiFile, MonashDatasetMultiFile
 
 
 
@@ -32,6 +41,37 @@ class CollectedDataset(torch.utils.data.Dataset):
 
 
 
+class CollectedDatasetMultiFile(torch.utils.data.IterableDataset):
+    """
+    combine multiple datasets
+    """
+
+    def __init__(self, datasets):
+        self.datasets = datasets
+        self.reset()
+        
+        self.tasks = list(datasets.keys())
+
+    def __iter__(self):
+
+        while True:
+            vals = {}
+            for key, dataset in self.datasets_iter.items():
+                vals[key] = next(dataset, None)
+
+            if all(val is None for val in vals.values()):
+                break
+
+            yield vals
+
+    def reset(self):
+        self.datasets_iter = {key: iter(dataset) for key, dataset in self.datasets.items()}
+
+
+
+
+
+
 def collate_fn(batch):
     """
     collate function
@@ -46,67 +86,208 @@ def collate_fn(batch):
     return data
 
 
-
-
-def get_data(batch_size, dataset_names):
+def get_data(batch_size, dataset_names,
+             all=False, files=None):
     """
     get data
     """
 
+    # from datasets import get_dataset_config_names
+    # configs = get_dataset_config_names("AutonLab/Timeseries-PILE")
+    # /zfsauton/project/public/Mononito/TimeseriesDatasets
+
     train_datasets = {}
     test_datasets = {}
     if 'imputation' in dataset_names:
-        train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
-                                                task_name='imputation',
-                                                data_stride_len=15
-                                                # data_stride_len=512
-                                                )
-        test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
-                                                task_name='imputation',
-                                                data_stride_len=15
-                                                # data_stride_len=512
-                                                )
+
+        if all:
+            train_dataset_impute = InformerDatasetMultiFile(batch_size=batch_size,
+                                                            data_split='train',
+                                                            random_seed=RANDOM_SEED,
+                                                            task_name='imputation',
+                                                            data_stride_len=15,
+                                                            files=files,
+                                                            )
+            test_dataset_impute = InformerDatasetMultiFile(batch_size=batch_size,
+                                                            data_split='test',
+                                                            random_seed=RANDOM_SEED,
+                                                            task_name='imputation',
+                                                            data_stride_len=15,
+                                                            files=files,
+                                                            )
+        else:
+            train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
+                                                    task_name='imputation',
+                                                    data_stride_len=15
+                                                    # data_stride_len=512
+                                                    )
+            test_dataset_impute = InformerDataset(data_split='test', random_seed=RANDOM_SEED,
+                                                    task_name='imputation',
+                                                    data_stride_len=15
+                                                    # data_stride_len=512
+                                                    )
+
+
         train_datasets['imputation'] = train_dataset_impute
         test_datasets['imputation'] = test_dataset_impute
 
     if 'anomaly' in dataset_names:
-        train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
-                                                        data_stride_len=100
-                                                        # data_stride_len=512
-                                                        )
-        test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
-                                                        data_stride_len=100
-                                                        # data_stride_len=512
-                                                        )
+
+        if all:
+            train_dataset_anomaly = AnomalyDetectionDatasetMultiFile(batch_size=batch_size,
+                                                                data_split='train',
+                                                                random_seed=RANDOM_SEED,
+                                                                data_stride_len=100,
+                                                                files=files
+                                                                )
+            test_dataset_anomaly = AnomalyDetectionDatasetMultiFile(batch_size=batch_size,
+                                                                data_split='test',
+                                                                random_seed=RANDOM_SEED,
+                                                                data_stride_len=100,
+                                                                files=files
+                                                                )
+        else:
+            train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
+                                                            data_stride_len=100
+                                                            # data_stride_len=512
+                                                            )
+            test_dataset_anomaly = AnomalyDetectionDataset(data_split='test', random_seed=RANDOM_SEED,
+                                                            data_stride_len=100
+                                                            # data_stride_len=512
+                                                            )
+
         train_datasets['anomaly'] = train_dataset_anomaly
         test_datasets['anomaly'] = test_dataset_anomaly
 
     if 'classify' in dataset_names:
-        train_dataset_classify = ClassificationDataset(data_split='train')
-        test_dataset_classify = ClassificationDataset(data_split='test')
+
+        if all:
+            train_dataset_classify = ClassificationDatasetMultiFile(batch_size=batch_size,
+                                                                    data_split='train',
+                                                                    files=files
+                                                                    )
+            test_dataset_classify = ClassificationDatasetMultiFile(batch_size=batch_size,
+                                                                    data_split='test',
+                                                                    files=files
+                                                                    )
+        else:
+            train_dataset_classify = ClassificationDataset(data_split='train')
+            test_dataset_classify = ClassificationDataset(data_split='test')
+
         train_datasets['classify'] = train_dataset_classify
         test_datasets['classify'] = test_dataset_classify
 
     if 'forecasting_long' in dataset_names:
-        train_dataset_forecast_long = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
-                                                        forecast_horizon=196,
-                                                        data_stride_len=15
-                                                        )
-        test_dataset_forecast_long = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
-                                                        forecast_horizon=196,
-                                                        data_stride_len=15
-                                                        )
+
+        if all:
+            train_dataset_forecast_long = InformerDatasetMultiFile(batch_size=batch_size,
+                                                                data_split='train',
+                                                                random_seed=RANDOM_SEED,
+                                                                forecast_horizon=96,
+                                                                data_stride_len=15,
+                                                                files=files
+                                                                )
+            test_dataset_forecast_long = InformerDatasetMultiFile(batch_size=batch_size,
+                                                                data_split='test',
+                                                                random_seed=RANDOM_SEED,
+                                                                forecast_horizon=96,
+                                                                data_stride_len=15,
+                                                                files=files
+                                                                )
+        else:
+            train_dataset_forecast_long = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
+                                                            forecast_horizon=196,
+                                                            data_stride_len=15
+                                                            )
+            test_dataset_forecast_long = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
+                                                            forecast_horizon=196,
+                                                            data_stride_len=15
+                                                            )
+
         train_datasets['forecasting_long'] = train_dataset_forecast_long
         test_datasets['forecasting_long'] = test_dataset_forecast_long
 
-    data = CollectedDataset(train_datasets)
-    train_loader = DataLoader(data, batch_size=batch_size, shuffle=False,
-                              collate_fn=collate_fn
-                              )
+    if 'forecasting_short' in dataset_names:
 
-    data = CollectedDataset(test_datasets)
+            if all:
+                train_dataset_forecast_short = MonashDatasetMultiFile(batch_size=batch_size,
+                                                                    data_split='train',
+                                                                    random_seed=RANDOM_SEED,
+                                                                    forecast_horizon=10,
+                                                                    data_stride_len=15,
+                                                                    files=files
+                                                                    )
+                test_dataset_forecast_short = MonashDatasetMultiFile(batch_size=batch_size,
+                                                                    data_split='test',
+                                                                    random_seed=RANDOM_SEED,
+                                                                    forecast_horizon=10,
+                                                                    data_stride_len=15,
+                                                                    files=files
+                                                                    )
+            else:
+                train_dataset_forecast_short = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
+                                                                forecast_horizon=10,
+                                                                data_stride_len=15
+                                                                )
+                test_dataset_forecast_short = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
+                                                                forecast_horizon=10,
+                                                                data_stride_len=15
+                                                                )
+
+            train_datasets['forecasting_short'] = train_dataset_forecast_short
+            test_datasets['forecasting_short'] = test_dataset_forecast_short
+
+
+    if all:
+        data = CollectedDatasetMultiFile(train_datasets)
+        # data = train_datasets
+    else:
+        data = CollectedDataset(train_datasets)
+    train_loader = DataLoader(data, batch_size=batch_size, shuffle=False,
+                            collate_fn=collate_fn
+                            )
+    if all:
+        data = CollectedDatasetMultiFile(test_datasets)
+        # data = test_datasets
+    else:
+        data = CollectedDataset(test_datasets)
     test_loader = DataLoader(data, batch_size=batch_size, shuffle=False,
                              collate_fn=collate_fn
                              )
 
     return train_loader, test_loader
+
+
+
+
+
+
+def func(d):
+    yield next(d)
+
+
+if __name__ == '__main__':
+
+    batch_size = 8
+    dataset = InformerDatasetMultiFile(batch_size)
+
+    dataset = iter(dataset)
+    print(next(func(dataset)))
+    print(next(func(dataset)))
+
+    dataset = CollectedDatasetMultiFile({'imputation': dataset})
+
+    for d in dataset:
+        print(d)
+
+    print(next(dataset))
+    print(next(dataset))
+
+    loader = DataLoader(dataset, batch_size=batch_size)
+
+    for timeseries, input_mask, labels in loader:
+        print(timeseries.shape, input_mask.shape, labels.shape)
+
+
+
+

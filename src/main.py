@@ -15,6 +15,15 @@ https://github.com/allenai/better-promptability/blob/5cb1e33c9988f6f973e92a1c78d
 
 
 TODO:
+
+
+- use all data
+
+- what's the common argument in literature for prompt tuning (saving params)?
+    - https://arxiv.org/pdf/2110.07602
+
+
+
 - does it make sense to flatten the data to train deep prompt?
     - time dimension gets flattened too (#patches)
 - should I exclude the MPT when training the deep prompt?
@@ -65,7 +74,7 @@ import torch
 
 from momentfm.utils.utils import control_randomness
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 
@@ -80,41 +89,188 @@ control_randomness(seed=RANDOM_SEED)
 
 
 
-if __name__ == "__main__":
 
+
+
+
+
+def classify_experiments(experiment_name, epochs=20):
     from data import get_data
     from experiments import zero_shot, finetune, prompt_tuning
 
 
-    # os.environ["WANDB_MODE"] = "offline"
-
-    EXPERIMENT_NAME = 'finetune'
-
-    multitask = True
+    multitask = False
     multivariable = True
+    no_train_forehead = False
+    
+    dataset_names = ['classify']
 
-    dataset_names = ['imputation', 'anomaly', 'classify', 'forecasting_long']
 
-    # if not multitask and not multivariable and EXPERIMENT_NAME == 'prompt_tuning':
-    #     dataset_names = ['forecasting_long']
-
-    batch_size = 8
+    batch_size = 1
 
     name = ''
-    if EXPERIMENT_NAME == 'zero_shot':
+    if experiment_name == 'zero_shot':
         experiment = zero_shot
-    elif EXPERIMENT_NAME == 'finetune':
+    elif experiment_name == 'finetune':
         experiment = finetune
-    elif EXPERIMENT_NAME == 'prompt_tuning':
+        name = 'finetune'
+    elif experiment_name == 'prompt_tuning':
         experiment = prompt_tuning
-        name = f'_multitask_{multitask}_multivariable_{multivariable}'
+        name = 'prompttune'
     else:
         raise NotImplementedError
 
 
-    train_loader, test_loader = get_data(batch_size=batch_size, dataset_names=dataset_names)
+    experiment_files = {
+        'AtrialFibrillation': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation_TEST.ts",
+                               "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation_TRAIN.ts"),
+        'Epilepsy': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Epilepsy/Epilepsy_TEST.ts",
+                    "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Epilepsy/Epilepsy_TRAIN.ts"),
+        'ERing': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/ERing/ERing_TEST.ts",
+                    "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/ERing/ERing_TRAIN.ts"),
+        'Cricket': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Cricket/Cricket_TEST.ts",
+                    "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Cricket/Cricket_TRAIN.ts"),
+        'SelfRegulationSCP1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TEST.ts",
+                               "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TRAIN.ts"),
+        'SelfRegulationSCP2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TEST.ts",
+                    "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TRAIN.ts"),
+        'Heartbeat': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TEST.ts",
+                    "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TRAIN.ts"),
+                 }
+    
+    for dataset_name, files in experiment_files.items():
+        # check file exist
+        assert all([os.path.exists(file) for file in files])
+        
+        
+    for dataset_name, files in experiment_files.items():
+        name_ = dataset_names[0] + '_' + name + '_' + dataset_name
 
-    model = experiment(train_loader, test_loader, name,
-                       prefix_tuning_multi=multivariable,
-                       MPT=multitask,
-                       )
+        train_loader, test_loader = get_data(batch_size=batch_size, dataset_names=dataset_names, all=True,
+                                            files=files)
+
+        model = experiment(train_loader, test_loader, name_,
+                        prefix_tuning_multi=multivariable,
+                        MPT=multitask,
+                        no_train_forehead=no_train_forehead,
+                        epochs=epochs
+                        )
+
+
+
+
+
+def informer_experiments(dataset_names, experiment_name, epochs=20,):
+    
+    from data import get_data
+    from experiments import zero_shot, finetune, prompt_tuning
+
+
+    multitask = False
+    multivariable = True
+    no_train_forehead = False
+    
+    batch_size = 1
+
+    name = ''
+    if experiment_name == 'zero_shot':
+        experiment = zero_shot
+    elif experiment_name == 'finetune':
+        experiment = finetune
+        name = 'finetune'
+    elif experiment_name == 'prompt_tuning':
+        experiment = prompt_tuning
+        name = 'prompttune'
+    else:
+        raise NotImplementedError    
+    
+        
+    experiment_files = {
+        'ETTh1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv", ),
+        'ETTh2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", ),
+        'ETTm1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv", ),
+        'ETTm2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv", ),
+        # 'national_illness': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/national_illness.csv", ),  # TODO: need forecast horizon 24 or 60
+        'exchange_rate': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", ),
+    }
+    
+    for dataset_name, files in experiment_files.items():
+        # check file exist
+        assert all([os.path.exists(file) for file in files])
+        
+        
+    for dataset_name, files in experiment_files.items():
+        name_ = dataset_names[0] + '_' + name + '_' + dataset_name
+
+        train_loader, test_loader = get_data(batch_size=batch_size, dataset_names=dataset_names, all=True,
+                                            files=files)
+
+        model = experiment(train_loader, test_loader, name_,
+                        prefix_tuning_multi=multivariable,
+                        MPT=multitask,
+                        no_train_forehead=no_train_forehead,
+                        epochs=epochs
+                        )
+
+
+def long_forecast_experiments(experiment_name, epochs=20):
+    # TODO: performance metrics, for all experiments
+    dataset_names = ['forecasting_long']
+
+    informer_experiments(dataset_names, experiment_name, epochs=epochs)
+
+
+
+def imputation_experiments(experiment_name, epochs=20):
+
+    dataset_names = ['imputation']
+
+    informer_experiments(dataset_names, experiment_name, epochs=epochs)
+
+
+
+
+if __name__ == "__main__":
+    from data import get_data
+    from experiments import zero_shot, finetune, prompt_tuning
+
+    os.environ["WANDB_MODE"] = "offline"
+
+    EXPERIMENT_NAME = 'prompt_tuning'
+    # EXPERIMENT_NAME = 'finetune'
+
+
+    # classify_experiments(EXPERIMENT_NAME, epochs=20)
+    imputation_experiments(EXPERIMENT_NAME, epochs=20)
+    # long_forecast_experiments(EXPERIMENT_NAME, epochs=20)
+
+
+    # TODO: how to train forecast short?
+
+
+
+    # all = True
+
+    # multitask = False
+    # multivariable = True
+
+    # no_train_forehead = False
+
+    # dataset_names = ['imputation', 'anomaly', 'classify', 'forecasting_long']
+
+    # if not multitask and not multivariable and EXPERIMENT_NAME == 'prompt_tuning':
+    #     dataset_names = ['forecasting_long']
+
+    # batch_size = 1
+
+    # name = ''
+    # if EXPERIMENT_NAME == 'zero_shot':
+    #     experiment = zero_shot
+    # elif EXPERIMENT_NAME == 'finetune':
+    #     experiment = finetune
+    # elif EXPERIMENT_NAME == 'prompt_tuning':
+    #     experiment = prompt_tuning
+    #     name = f'_multitask_{multitask}_multivariable_{multivariable}'
+    # else:
+    #     raise NotImplementedError
+

@@ -27,7 +27,7 @@ def zero_shot(train_loader, test_loader, name='', **kwargs):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizon': 196,
+            'forecast_horizon': 96,
             # 'prefix_tuning': False,
             # 'prefix_tuning_multi': False,
             # 'MPT': True,
@@ -59,14 +59,16 @@ def zero_shot(train_loader, test_loader, name='', **kwargs):
 
 def prompt_tuning(train_loader, test_loader, name='',
                   prefix_tuning_multi=False,
-                  MPT=False,):
+                  MPT=False,
+                  no_train_forehead=False,
+                  epochs=400):
     """
     prompt tuning
     """
 
     wandb.init(
         project="ts-prompt",
-        name="multivariate_deep_prompt_tuning" + name,
+        name=name,
     )
 
     # imputation model
@@ -79,7 +81,7 @@ def prompt_tuning(train_loader, test_loader, name='',
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizon': 196,
+            'forecast_horizon': 96,
             # 'prefix_tuning': True,
             'prefix_tuning_multi': prefix_tuning_multi,
             'MPT': MPT,
@@ -96,12 +98,18 @@ def prompt_tuning(train_loader, test_loader, name='',
         if 'prefix' not in name and 'prompt' not in name and 'fore_head' not in name and 'mpt' not in name:
             param.requires_grad = False
 
+    if no_train_forehead:
+        for param in model.fore_head.parameters():
+            param.requires_grad = False
+
     # print frozen params
     for name, param in model.named_parameters():
         if param.requires_grad:
             print(name)
 
-    model = train(model, train_loader, test_loader)
+    # sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    model = train(model, train_loader, test_loader, max_epoch=epochs)
 
     wandb.finish()
 
@@ -111,13 +119,13 @@ def prompt_tuning(train_loader, test_loader, name='',
 
 
 
-def finetune(train_loader, test_loader, name='', **kwargs):
+def finetune(train_loader, test_loader, name='', epochs=400, **kwargs):
     """
     finetune
     """
     wandb.init(
         project="ts-prompt",
-        name="multivariate_deep_finetune",
+        name=name,
     )
 
     # imputation model
@@ -129,7 +137,7 @@ def finetune(train_loader, test_loader, name='', **kwargs):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizon': 196,
+            'forecast_horizon': 96,
             # 'prefix_tuning': False,
             # 'prefix_tuning_multi': False,
             # 'MPT': True,
@@ -148,7 +156,7 @@ def finetune(train_loader, test_loader, name='', **kwargs):
         if param.requires_grad:
             print(name)
 
-    model = train(model, train_loader, test_loader)
+    model = train(model, train_loader, test_loader, max_epoch=epochs)
 
     wandb.finish()
 
