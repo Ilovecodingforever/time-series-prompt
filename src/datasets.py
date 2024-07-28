@@ -14,7 +14,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from main import RANDOM_SEED
-from momentfm.utils.data import load_from_tsfile
+from momentfm.utils.data import load_from_tsfile, convert_tsf_to_dataframe
 
 
 
@@ -91,6 +91,10 @@ class AnomalyDetectionDatasetMultiFile(torch.utils.data.IterableDataset):
     def _read_data(self, file):
         self.scaler = StandardScaler()
         df = pd.read_csv(file)
+        
+        # TODO: too much data
+        df = df.iloc[-int(len(df) * 0.05):]
+        
         df.interpolate(inplace=True, method="cubic")
 
         self.length_timeseries = len(df)
@@ -116,33 +120,35 @@ class AnomalyDetectionDatasetMultiFile(torch.utils.data.IterableDataset):
 
     def __iter__(self):
 
-        for filename in self.files:
-            self._read_data(filename)
+        for dir in self.files:
+            for filename in glob.glob(dir + '/**/*.*', recursive=True):
+                self.filename = filename
+                self._read_data(filename)
 
-            # make sure that one batch don't contain different datasets (channel size mixup)
-            num = (self.length_timeseries // self.data_stride_len) + 1
-            num = num // self.batch_size * self.batch_size
+                # make sure that one batch don't contain different datasets (channel size mixup)
+                num = (self.length_timeseries // self.data_stride_len) + 1
+                num = num // self.batch_size * self.batch_size
 
-            for index in range(num):
+                for index in range(num):
 
-                seq_start = self.data_stride_len * index
-                seq_end = seq_start + self.seq_len
-                input_mask = np.ones(self.seq_len)
+                    seq_start = self.data_stride_len * index
+                    seq_end = seq_start + self.seq_len
+                    input_mask = np.ones(self.seq_len)
 
-                if seq_end > self.length_timeseries:
-                    seq_start = self.length_timeseries - self.seq_len
-                    seq_end = None
+                    if seq_end > self.length_timeseries:
+                        seq_start = self.length_timeseries - self.seq_len
+                        seq_end = None
 
-                timeseries = self.data[seq_start:seq_end].reshape(
-                    (self.n_channels, self.seq_len)
-                )
-                labels = (
-                    self.labels[seq_start:seq_end]
-                    .astype(int)
-                    .reshape((self.n_channels, self.seq_len))
-                )
+                    timeseries = self.data[seq_start:seq_end].reshape(
+                        (self.n_channels, self.seq_len)
+                    )
+                    labels = (
+                        self.labels[seq_start:seq_end]
+                        .astype(int)
+                        .reshape((self.n_channels, self.seq_len))
+                    )
 
-                yield timeseries, input_mask, labels
+                    yield timeseries, input_mask, labels
 
 
 
@@ -197,6 +203,7 @@ class ClassificationDatasetMultiFile(torch.utils.data.IterableDataset):
             self.original_length = [s.shape[1] for s in self.data]
 
             # TODO: pad or trim or split?
+            # TODO: change input_mask to not include padding
             self.data = [s[:, -self.seq_len:] if s.shape[1] >= self.seq_len else np.pad(s, ((0, 0), (self.seq_len - s.shape[1], 0))) \
                 for s in self.data]
             self.data = np.stack(self.data, axis=0)
@@ -225,6 +232,8 @@ class ClassificationDatasetMultiFile(torch.utils.data.IterableDataset):
     def __iter__(self):
         for filename in self.files:
             if self.data_split in filename.lower():
+                self.filename = filename
+                
                 # get labels
                 _, self.train_labels = load_from_tsfile(filename.replace(self.data_split.upper(), "TRAIN"))
 
@@ -286,7 +295,6 @@ class InformerDatasetMultiFile(torch.utils.data.IterableDataset):
         # TODO: need to init?
 
         self.batch_size = batch_size
-
 
         self.dir = dir
         # TODO: shuffle this?
@@ -352,6 +360,7 @@ class InformerDatasetMultiFile(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         for filename in self.files:
+            self.filename = filename
             # get data
             self._read_data(filename)
 
@@ -391,6 +400,7 @@ class InformerDatasetMultiFile(torch.utils.data.IterableDataset):
                         seq_end = seq_end - self.forecast_horizon
                         seq_start = seq_end - self.seq_len
 
+                    assert(seq_start >=0 and seq_end >= 0 and pred_end >= 0)
                     timeseries = self.data[seq_start:seq_end, :].T
                     forecast = self.data[seq_end:pred_end, :].T
 
@@ -427,7 +437,7 @@ class MonashDatasetMultiFile(InformerDatasetMultiFile):
             Random seed for reproducibility.
         """
 
-        super().__init__(batch_size, forecast_horizon, data_split, data_stride_len, task_name, random_seed)
+        super().__init__(batch_size, forecast_horizon, data_split, data_stride_len, 'forecasting_short', random_seed)
 
         self.dir = dir
 
@@ -442,33 +452,89 @@ class MonashDatasetMultiFile(InformerDatasetMultiFile):
 
         self.scaler = StandardScaler()
 
-        self.data, self.labels = load_from_tsfile(filename)
+        df = convert_tsf_to_dataframe(filename)[['series_value']]
 
-        # TODO: need this line? what does self.labels do?
-        self.labels = self._transform_labels(self.labels)
+        # shuffle
+        df = df.sample(frac=1, random_state=RANDOM_SEED)
+        
+        # TODO: too much data
+        df = df.iloc[:int(len(df) * 0.5)]
 
-        self.original_length = None
-        if isinstance(self.data, list):
-
-            self.original_length = [s.shape[1] for s in self.data]
-
-            # TODO: pad or trim or split?
-            self.data = [s[:, -self.seq_len:] if s.shape[1] >= self.seq_len else np.pad(s, ((0, 0), (self.seq_len - s.shape[1], 0))) \
-                for s in self.data]
-            self.data = np.stack(self.data, axis=0)
-
-
-        self.num_timeseries = self.data.shape[0]
-        self.len_timeseries = self.data.shape[2]
-        self.num_dims = self.data.shape[1]
+        # TODO: shuffle?
+        if self.data_split == "train":
+            df = df.iloc[:int(len(df) * 0.6)]
+        elif self.data_split == "val":
+            df = df.iloc[int(len(df) * 0.6):int(len(df) * 0.7)]
+        elif self.data_split == "test":
+            df = df.iloc[int(len(df) * 0.7):]
 
 
-        self.data = self.data.transpose(0, 2, 1).reshape(-1, self.num_dims)
-        self.scaler.fit(self.data)
-        self.data = self.scaler.transform(self.data)
-        # num x dim x len
-        self.data = self.data.reshape(self.num_timeseries, self.len_timeseries, self.num_dims).transpose(0, 2, 1)
+        # self.data = [np.array(s).reshape(1, -1) for s in df['series_value'].values]
+
+        # if isinstance(self.data, list):
+
+        #     self.original_length = [s.shape[1] for s in self.data]
+
+        #     # TODO: pad or trim or split?
+        #     self.data = [s[:, -self.seq_len:] if s.shape[1] >= self.seq_len else np.pad(s, ((0, 0), (self.seq_len - s.shape[1], 0))) \
+        #         for s in self.data]
+        #     self.data = np.stack(self.data, axis=0)
+
+
+        # # TODO: do scaler only on training
+        # data = self.data.reshape(-1, self.seq_len).T
+        # self.scaler.fit(data)
+        # data = self.scaler.transform(data)
+        # self.data = data.T.reshape(self.data.shape[0], self.data.shape[1], self.seq_len)
+
+        # self.n_channels = self.data.shape[1]
+
+        self.data = [np.array(s).reshape(-1, 1) for s in df['series_value'].values]
 
 
 
+    def __iter__(self):
+        # TODO: debug this
+        for filename in self.files:
+            # get data
+            self._read_data(filename)
 
+            self.filename = filename
+
+            for d in self.data:
+                # TODO: do scaler only on training
+                self.scaler.fit(d)
+                d = self.scaler.transform(d)
+
+                num = (
+                    len(d) - self.seq_len - self.forecast_horizon
+                ) // self.data_stride_len + 1
+
+                if num < 0:
+                    # print("data too short")
+                    num = 1
+
+                num = num // self.batch_size * self.batch_size
+                for index in range(num):
+
+                    seq_start = self.data_stride_len * index
+                    seq_end = seq_start + self.seq_len
+                    input_mask = np.ones(self.seq_len)
+
+                    pred_end = seq_end + self.forecast_horizon
+
+                    # TODO: check if this is correct
+                    if len(d) < self.seq_len:
+                        d = np.pad(d, ((self.seq_len + pred_end - len(d), 0), (0, 0)))
+                        input_mask[: self.seq_len + pred_end - len(d)] = 0
+
+                    if pred_end > len(d):
+                        pred_end = len(d)
+                        seq_end = seq_end - self.forecast_horizon
+                        seq_start = seq_end - self.seq_len
+
+                    assert(seq_start >=0 and seq_end >= 0 and pred_end >= 0)
+                    timeseries = d[seq_start:seq_end, :].T
+                    forecast = d[seq_end:pred_end, :].T
+
+                    yield timeseries, forecast, input_mask

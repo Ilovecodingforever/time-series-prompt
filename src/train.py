@@ -1,6 +1,9 @@
 """
 train model
 """
+import datetime
+import pickle
+import os
 from copy import deepcopy
 
 import numpy as np
@@ -57,7 +60,8 @@ def step(model, batch, criterion, mask_generator,):
 
             # Reshape to [batch_size * n_channels, 1, window_size]
             # batch_x = batch_x.reshape((-1, 1, 512)).to(DEVICE).float()
-            batch_x = batch_x.to(DEVICE).float()
+            # batch_x = batch_x.to(DEVICE).float()
+            batch_x = batch_x.to(DEVICE).double()
 
             batch_masks = batch_masks.to(DEVICE).long()
             batch_masks = batch_masks[:, None, :].repeat(1, n_channels, 1)
@@ -68,8 +72,11 @@ def step(model, batch, criterion, mask_generator,):
                 x=batch_x.reshape(-1, 1, 512),
                 input_mask=batch_masks.reshape(-1, 512)).to(DEVICE).long()
             # mask = mask.reshape(-1, n_channels, 512)
-            mask = mask.reshape(-1, n_channels, 512)[:, 0, :] # TODO: is mask 2D or 3D?
+            mask = mask.reshape(-1, n_channels, 512)[:, 0, :] # TODO: is mask 2D or 3D? different for each channel?
             batch_masks = batch_masks[:, 0, :]
+
+            if key == 'classify':
+                mask = torch.ones_like(mask)
 
             # Forward
             output = model(batch_x, input_mask=batch_masks, mask=mask, task_name=key)
@@ -84,12 +91,14 @@ def step(model, batch, criterion, mask_generator,):
                 if key == 'classify':
                     embedding = output.embeddings
 
-                    x = embedding.detach().cpu().numpy()
-                    y = labels.detach().cpu().numpy()
+                    xs[key] = embedding.detach().cpu().numpy()
+                    ys[key] = labels.detach().cpu().numpy()
 
                 elif key == 'anomaly':
-                    x = output.reconstruction.detach().cpu().numpy()
-                    y = labels.detach().cpu().numpy()
+                    # We will use the Mean Squared Error (MSE) between the observed values and MOMENT's predictions as the anomaly score
+                    anomaly_scores = (batch_x - output.reconstruction)**2
+                    xs[key] = anomaly_scores.detach().cpu().numpy()
+                    ys[key] = labels.detach().cpu().numpy()
 
                 else:
                     raise NotImplementedError
@@ -104,95 +113,188 @@ def step(model, batch, criterion, mask_generator,):
                 loss += val
                 losses[key] += val.detach().cpu().numpy()
 
-                x = output.reconstruction[observed_mask == 1].detach().cpu().numpy()
-                y = batch_x[observed_mask == 1].detach().cpu().numpy()
+                xs[key] = output.reconstruction[observed_mask == 1].detach().cpu().numpy()
+                ys[key] = batch_x[observed_mask == 1].detach().cpu().numpy()
 
             else:
                 raise NotImplementedError
 
 
         elif key in ('forecasting_short', 'forecasting_long'):
+            
+            # torch.autograd.set_detect_anomaly(True)
 
             model.task_name = TASKS.FORECASTING
 
+            if key == 'forecasting_short':
+                model.fore_head = model.fore_head_8
+            elif key == 'forecasting_long':
+                model.fore_head = model.fore_head_96
+
             timeseries, forecast, input_mask = data
             # Move the data to the GPU
-            timeseries = timeseries.float().to(DEVICE)
+            # timeseries = timeseries.float().to(DEVICE)
+            timeseries = timeseries.double().to(DEVICE)
             input_mask = input_mask.to(DEVICE)
-            forecast = forecast.float().to(DEVICE)
+            # forecast = forecast.float().to(DEVICE)
+            forecast = forecast.double().to(DEVICE)
 
             with torch.cuda.amp.autocast():
                 output = model(timeseries, input_mask, task_name=key)
 
             val = criterion(output.forecast, forecast).mean()
+
+            if val.isnan():
+                print('nan')
+            # # check nan weights
+            # for name, param in model.named_parameters():
+            #     if torch.isnan(param).any():
+            #         print(name)
+            #         print(param)
+
             loss += val
             losses[key] = val.detach().cpu().numpy()
 
-            x = output.forecast.detach().cpu().numpy()
-            y = forecast.detach().cpu().numpy()
+            xs[key] = output.forecast.detach().cpu().numpy()
+            ys[key] = forecast.detach().cpu().numpy()
 
         else:
             raise NotImplementedError
-
-
 
     return loss, model, losses, xs, ys
 
 
-
-def evaluate(model, loader, criterion, mask_generator, clf=None):
-
-    model.eval()
-
+def get_performance(ys, xs, losses, task, curr_filename, clf=None, split='train', cur_epoch=0, log=True):
     performances = {}
 
-    for task in loader.dataset.tasks:
-        if isinstance(loader.dataset, torch.utils.data.IterableDataset):
-            loader.dataset.reset()
-            it = tqdm(loader)
-        else:
-            it = tqdm(loader, total=len(loader))
+    xs = np.concatenate(xs, axis=0)
+    ys = np.concatenate(ys, axis=0)
+    loss = np.average(losses)
 
-        xs, ys = [], []
+    if task == 'classify':
+        if clf is None:
+            clf = fit_svm(features=xs, y=ys)
+        acc = clf.score(xs, ys)
+        performances[task] = {
+            'accuracy': acc,
+            'loss': loss,
+        }
+    elif task == 'anomaly':
+        # TODO: anomaly performance, VUS ROC
+        # https://github.com/TheDatumOrg/VUS
 
-        with torch.no_grad():
-            for data in it:
-                _, _, _, x, y = step(model, data[task], criterion, mask_generator,)
-                xs.append(x)
-                ys.append(y)
+        performances[task] = {
+            'adj F1': adjbestf1(ys.reshape(-1), xs.reshape(-1)),
+            'loss': loss,
+        }
+    elif task in ('imputation', 'forecasting_long'):
+        p = get_forecasting_metrics(ys, xs)
+        performances[task] = {
+            'mse': p.mse,
+            'mae': p.mae,
+            'loss': loss,
+        }
+    elif task == 'forecasting_short':
+        p = get_forecasting_metrics(ys, xs)
+        performances[task] = {
+            'smape': p.smape,
+            'loss': loss,
+        }
+    else:
+        raise NotImplementedError
 
+    for key1 in performances.keys():
+        for key2 in performances[key1].keys():
+            if key2 == 'loss' and split == 'train':
+                continue
 
-        xs = np.concatenate(xs, axis=0)
-        ys = np.concatenate(ys, axis=0)
-
-        if task == 'classify':
-            if clf is None:
-                clf = fit_svm(features=xs, y=ys)
-            acc = clf.score(xs, ys)
-            performances[task] = {
-                'accuracy': acc,
-            }
-        elif task == 'anomaly':
-            # TODO: anomaly performance, VUS ROC
-            # https://github.com/TheDatumOrg/VUS
-            performances[task] = {
-                'adj F1': adjbestf1(ys, xs) # TODO: is this correct?
-            }
-        elif task in ('imputation', 'forecasting_long'):
-            p = get_forecasting_metrics(ys, xs)
-            performances[task] = {
-                'mse': p['mse'],
-                'mae': p['mae'],
-            }
-        elif task == 'forecasting_short':
-            p = get_forecasting_metrics(ys, xs)
-            performances[task] = {
-                'smape': p['smape'],
-            }
-        else:
-            raise NotImplementedError
+            logging = {split+ '_'+key1+'_'+curr_filename.split('/')[-2]+'/'+curr_filename.split('/')[-1]+'_'+key2: performances[key1][key2]}
+            print(logging)
+            if log:
+                wandb.log(logging, step=cur_epoch)
 
     return performances, clf
+
+
+
+def evaluate(model, loader, criterion, mask_generator, split, cur_epoch, clfs=None, log=True,
+             logging_dir=None):
+
+    if not os.path.exists(logging_dir):
+        os.makedirs(logging_dir)
+
+    model.eval()
+    clfs = {} if clfs is None else clfs
+
+    clf = None
+
+    with torch.no_grad():
+        for task in loader.dataset.tasks:
+            if isinstance(loader.dataset, torch.utils.data.IterableDataset):
+                loader.dataset.reset()
+                it = tqdm(loader, total=loader.bs)
+            else:
+                it = tqdm(loader, total=len(loader))
+
+            xs, ys, losses = [], [], []
+
+            curr_filename = None
+
+            for b, data in enumerate(it):
+                if curr_filename is None:
+                    curr_filename = loader.dataset.filenames[task]
+
+                if curr_filename != loader.dataset.filenames[task]:
+                    clf = None
+                    name = curr_filename.split('/')[-2]
+                    if task == 'classify' and name in clfs:
+                        clf = clfs[name]
+                        print('using trained clf')
+                    performances, clf = get_performance(ys, xs, losses, task, curr_filename, clf=clf, split=split, cur_epoch=cur_epoch,
+                                                        log=log)
+
+                    # performance to pickle
+                    if not os.path.exists(logging_dir+'/'+task):
+                        os.makedirs(logging_dir+'/'+task)
+                    with open(logging_dir+'/'+task+'/'+curr_filename.split('/')[-2]+'_'+curr_filename.split('/')[-1]+'.pkl', 'wb') as f:
+                        pickle.dump(performances, f)
+
+                    clfs[name] = clf
+                    xs, ys, losses = [], [], []
+                    curr_filename = loader.dataset.filenames[task]
+
+                if task not in data:
+                    break
+                loss, _, _, x, y = step(model, {task: data[task]}, criterion, mask_generator,)
+                xs.append(x[task])
+                ys.append(y[task])
+                losses.append(loss.item())
+
+
+            clf = None
+            name = curr_filename.split('/')[-2]
+            if task == 'classify' and name in clfs:
+                clf = clfs[name]
+                print('using trained clf')
+            performances, clf = get_performance(ys, xs, losses, task, curr_filename, clf=clf, split=split, cur_epoch=cur_epoch,
+                                                log=log)
+
+            # performance to pickle
+            if not os.path.exists(logging_dir+'/'+task):
+                os.makedirs(logging_dir+'/'+task)
+            with open(logging_dir+'/'+task+'/'+curr_filename.split('/')[-2]+'_'+curr_filename.split('/')[-1]+'.pkl', 'wb') as f:
+                pickle.dump(performances, f)
+
+            clfs[name] = clf
+
+
+                # if b == 100:
+                #     break
+
+
+    model.train()
+
+    return clfs
 
 
 
@@ -202,7 +304,8 @@ def evaluate(model, loader, criterion, mask_generator, clf=None):
 def train(model, train_loader, test_loader,
           # Gradient clipping value
           max_norm = 5.0,
-          max_epoch = 400, max_lr = 1e-2
+          max_epoch = 400, max_lr = 1e-2,
+          identifier=None
           ):
     """
     prompt tuning
@@ -227,7 +330,65 @@ def train(model, train_loader, test_loader,
 
     mask_generator = Masking(mask_ratio=0.3)
 
+
+    logging_dir = 'performance/' + identifier + '/' + str(datetime.datetime.now())
+    if not os.path.exists(logging_dir):
+        os.makedirs(logging_dir)
+
+    model.double()
+
+    train_bs = 0
+    for data in train_loader:
+        train_bs += 1
+    train_loader.bs = train_bs
+
+    test_bs = 0
+    for data in test_loader:
+        test_bs += 1
+    test_loader.bs = test_bs
+
+
+    # https://discuss.pytorch.org/t/finding-source-of-nan-in-forward-pass/51153/3
+    def nan_hook(self, inp, output):
+        if not isinstance(output, tuple):
+            outputs = [output]
+        else:
+            outputs = output
+
+        for i, out in enumerate(outputs):
+            if out is None:
+                continue
+            if not isinstance(out, torch.Tensor):
+                
+                for j, o in enumerate(out):
+                    if torch.isnan(out[o]).any():
+                        print("In", self.__class__.__name__)
+                        raise RuntimeError(f"Found NAN in output {i} at indices: ", torch.isnan(out[o]).nonzero(), "where:", o[torch.isnan(out[o]).nonzero()[:, 0].unique(sorted=True)])
+            
+                    if torch.isinf(out[o]).any():
+                        print("In", self.__class__.__name__)
+                        raise RuntimeError(f"Found INF in output {i} at indices: ", torch.isinf(out[o]).nonzero(), "where:", o[torch.isinf(out[o]).nonzero()[:, 0].unique(sorted=True)])
+            else:
+                nan_mask = torch.isnan(out)
+                if nan_mask.any():
+                    print("In", self.__class__.__name__)
+                    raise RuntimeError(f"Found NAN in output {i} at indices: ", nan_mask.nonzero(), "where:", out[nan_mask.nonzero()[:, 0].unique(sorted=True)])
+                
+                inf_mask = torch.isinf(out)
+                if inf_mask.any():
+                    print("In", self.__class__.__name__)
+                    raise RuntimeError(f"Found INF in output {i} at indices: ", inf_mask.nonzero(), "where:", out[inf_mask.nonzero()[:, 0].unique(sorted=True)])
+                
+    # for submodule in model.modules():
+    #     submodule.register_forward_hook(nan_hook)
+
+
+
     for cur_epoch in range(max_epoch):
+
+        # model = inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,
+        #                   logging_dir=logging_dir)
+
         model.train()
 
         losses = []
@@ -236,12 +397,16 @@ def train(model, train_loader, test_loader,
         if isinstance(train_loader.dataset, torch.utils.data.IterableDataset):
             train_loader.dataset.reset()
             test_loader.dataset.reset()
-            it = tqdm(train_loader)
+            it = tqdm(train_loader, total=train_loader.bs)
         else:
             it = tqdm(train_loader, total=len(train_loader))
 
         n_b = 0
         for data in it:
+
+            # continue
+            temp = deepcopy(model)
+
             loss, model, loss_dict, _, _ = step(model, data, criterion, mask_generator,)
 
             # Scales the loss for mixed precision training
@@ -259,33 +424,36 @@ def train(model, train_loader, test_loader,
             loss_dicts.append(loss_dict)
 
             n_b += 1
-
             # if n_b  == 10:
             #     break
 
+        print(train_loader.dataset.counts)
 
         losses = np.array(losses)
-        average_loss = np.average(losses)
+
+        # TODO: nan in forecast
+        average_loss = np.nanmean(losses)
+        # average_loss = np.average(losses)
         loss_dict = {key: np.nanmean(
             [d[key] if key in d.keys() else np.nan for d in loss_dicts]
             ) for key in loss_dicts[0].keys()}
 
         print(f"Epoch {cur_epoch}: Train loss: {average_loss:.3f}, Individual losses: {loss_dict}")
 
-        wandb.log({
+        log = {
             'train_loss': average_loss} | {
                 'train_'+key+'_loss': val for key, val in loss_dict.items()
-                },
-                  step=cur_epoch)
-
-
+                }
+        wandb.log(log, step=cur_epoch)
+        print(log)
 
         # Step the learning rate scheduler
         if scheduler is not None:
             scheduler.step()
 
         # Evaluate the model on the test split
-        model = inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,)
+        model = inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,
+                          logging_dir=logging_dir)
 
     return model
 
@@ -293,91 +461,25 @@ def train(model, train_loader, test_loader,
 
 
 def inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,
-              log=True):
+              log=True,
+              logging_dir=None):
     """
     perform inference
     """
 
-    trues, preds, losses, loss_dicts = [], [], [], []
-    test_embeddings, test_labels = [], []
+    clfs = evaluate(model, train_loader, criterion, mask_generator, 'train', cur_epoch, clfs=None, log=log, logging_dir=logging_dir+'/train/'+str(cur_epoch))
+    evaluate(model, test_loader, criterion, mask_generator, 'test', cur_epoch, clfs=clfs, log=log, logging_dir=logging_dir+'/test/'+str(cur_epoch))
 
-    model.eval()
+    print(test_loader.dataset.counts)
 
-    if isinstance(test_loader.dataset, torch.utils.data.IterableDataset):
-        train_loader.dataset.reset()
-        test_loader.dataset.reset()
-        it = tqdm(test_loader)
-    else:
-        it = tqdm(test_loader, total=len(test_loader))
-
-    n_b = 0
-    with torch.no_grad():
-        for data in test_loader:
-            n_b += 1
-            loss, model, loss_dict, embedding = step(model, data, criterion, mask_generator,)
-
-            losses.append(loss.item())
-            loss_dicts.append(loss_dict)
-
-            # classification
-            if embedding is not None:
-                _, _, batch_labels = data['classify']
-                test_labels.append(batch_labels)
-                test_embeddings.append(embedding.detach().cpu().numpy())
-
-            # if n_b  == 10:
-            #     break
-
-    losses = np.array(losses)
-    average_loss = np.average(losses)
-    loss_dict = {key: np.nanmean([d[key] if key in d.keys() else np.nan for d in loss_dicts]) \
-        for key in loss_dicts[0].keys()}
-
-    print(f"Epoch {cur_epoch}: Test loss: {average_loss:.3f}, Individual losses: {loss_dict}")
-    print(n_b, 'batches')
+    # test_performance, _ = evaluate(model, test_loader, criterion, mask_generator, clf=clf)
 
 
-    # classification
-    train_accuracy = None
-    test_accuracy = None
-    if len(test_embeddings) > 0:
-
-        train_embeddings, train_labels = [], []
-        if isinstance(train_loader.dataset, torch.utils.data.IterableDataset):
-            train_loader.dataset.reset()
-            test_loader.dataset.reset()
-            it = tqdm(train_loader)
-        else:
-            it = tqdm(train_loader, total=len(train_loader))
-
-        with torch.no_grad():
-            for data in it:
-                _, _, _, embedding = step(model, data, criterion, mask_generator)
-
-                # classification
-                if embedding is not None:
-                    _, _, batch_labels = data['classify']
-                    train_labels.append(batch_labels)
-                    train_embeddings.append(embedding.detach().cpu().numpy())
-
-        train_embeddings = np.concatenate(train_embeddings, axis=0)
-        test_embeddings = np.concatenate(test_embeddings, axis=0)
-        train_labels = np.concatenate(train_labels, axis=0)
-        test_labels = np.concatenate(test_labels, axis=0)
-
-        clf = fit_svm(features=train_embeddings, y=train_labels)
-        train_accuracy = clf.score(train_embeddings, train_labels)
-        test_accuracy = clf.score(test_embeddings, test_labels)
-
-        print(f"Train accuracy: {train_accuracy:.2f}, Test accuracy: {test_accuracy:.2f}")
-
-    if log:
-        wandb.log({'test_loss': average_loss,
-                   'train_accuracy': train_accuracy,
-                   'test_accuracy': test_accuracy,
-                   } | {'test_'+key+'_loss': val for key, val in loss_dict.items()}, step=cur_epoch)
-
-
-    model.train()
+    # for key1 in test_performance.keys():
+    #     for key2 in test_performance[key1].keys():
+    #         log = {'test_'+key1+'_'+key2: test_performance[key1][key2]}
+    #         print(log)
+    # if log:
+    #     wandb.log(log, step=cur_epoch)
 
     return model

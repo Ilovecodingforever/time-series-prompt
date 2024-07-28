@@ -48,9 +48,9 @@ class CollectedDatasetMultiFile(torch.utils.data.IterableDataset):
 
     def __init__(self, datasets):
         self.datasets = datasets
-        self.reset()
-        
         self.tasks = list(datasets.keys())
+        self.reset()
+
 
     def __iter__(self):
 
@@ -58,14 +58,20 @@ class CollectedDatasetMultiFile(torch.utils.data.IterableDataset):
             vals = {}
             for key, dataset in self.datasets_iter.items():
                 vals[key] = next(dataset, None)
+                if vals[key] is not None:
+                    self.counts[key] += 1
 
             if all(val is None for val in vals.values()):
                 break
+
+
+            self.filenames = {key: dataset.filename for key, dataset in self.datasets.items()}
 
             yield vals
 
     def reset(self):
         self.datasets_iter = {key: iter(dataset) for key, dataset in self.datasets.items()}
+        self.counts = {key: 0 for key in self.tasks}
 
 
 
@@ -101,19 +107,22 @@ def get_data(batch_size, dataset_names,
     if 'imputation' in dataset_names:
 
         if all:
+            f = files
+            if files is not None and isinstance(files, dict):
+                f = files['imputation']
             train_dataset_impute = InformerDatasetMultiFile(batch_size=batch_size,
                                                             data_split='train',
                                                             random_seed=RANDOM_SEED,
                                                             task_name='imputation',
                                                             data_stride_len=15,
-                                                            files=files,
+                                                            files=f,
                                                             )
             test_dataset_impute = InformerDatasetMultiFile(batch_size=batch_size,
                                                             data_split='test',
                                                             random_seed=RANDOM_SEED,
                                                             task_name='imputation',
                                                             data_stride_len=15,
-                                                            files=files,
+                                                            files=f,
                                                             )
         else:
             train_dataset_impute = InformerDataset(data_split='train', random_seed=RANDOM_SEED,
@@ -134,17 +143,20 @@ def get_data(batch_size, dataset_names,
     if 'anomaly' in dataset_names:
 
         if all:
+            f = files
+            if files is not None and isinstance(files, dict):
+                f = files['anomaly']
             train_dataset_anomaly = AnomalyDetectionDatasetMultiFile(batch_size=batch_size,
                                                                 data_split='train',
                                                                 random_seed=RANDOM_SEED,
                                                                 data_stride_len=100,
-                                                                files=files
+                                                                files=f
                                                                 )
             test_dataset_anomaly = AnomalyDetectionDatasetMultiFile(batch_size=batch_size,
                                                                 data_split='test',
                                                                 random_seed=RANDOM_SEED,
                                                                 data_stride_len=100,
-                                                                files=files
+                                                                files=f
                                                                 )
         else:
             train_dataset_anomaly = AnomalyDetectionDataset(data_split='train', random_seed=RANDOM_SEED,
@@ -162,13 +174,16 @@ def get_data(batch_size, dataset_names,
     if 'classify' in dataset_names:
 
         if all:
+            f = files
+            if files is not None and isinstance(files, dict):
+                f = files['classify']
             train_dataset_classify = ClassificationDatasetMultiFile(batch_size=batch_size,
                                                                     data_split='train',
-                                                                    files=files
+                                                                    files=f
                                                                     )
             test_dataset_classify = ClassificationDatasetMultiFile(batch_size=batch_size,
                                                                     data_split='test',
-                                                                    files=files
+                                                                    files=f
                                                                     )
         else:
             train_dataset_classify = ClassificationDataset(data_split='train')
@@ -180,27 +195,30 @@ def get_data(batch_size, dataset_names,
     if 'forecasting_long' in dataset_names:
 
         if all:
+            f = files
+            if files is not None and isinstance(files, dict):
+                f = files['forecasting_long']
             train_dataset_forecast_long = InformerDatasetMultiFile(batch_size=batch_size,
                                                                 data_split='train',
                                                                 random_seed=RANDOM_SEED,
                                                                 forecast_horizon=96,
                                                                 data_stride_len=15,
-                                                                files=files
+                                                                files=f
                                                                 )
             test_dataset_forecast_long = InformerDatasetMultiFile(batch_size=batch_size,
                                                                 data_split='test',
                                                                 random_seed=RANDOM_SEED,
                                                                 forecast_horizon=96,
                                                                 data_stride_len=15,
-                                                                files=files
+                                                                files=f
                                                                 )
         else:
             train_dataset_forecast_long = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
-                                                            forecast_horizon=196,
+                                                            forecast_horizon=96,
                                                             data_stride_len=15
                                                             )
             test_dataset_forecast_long = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
-                                                            forecast_horizon=196,
+                                                            forecast_horizon=96,
                                                             data_stride_len=15
                                                             )
 
@@ -209,33 +227,36 @@ def get_data(batch_size, dataset_names,
 
     if 'forecasting_short' in dataset_names:
 
-            if all:
-                train_dataset_forecast_short = MonashDatasetMultiFile(batch_size=batch_size,
-                                                                    data_split='train',
-                                                                    random_seed=RANDOM_SEED,
-                                                                    forecast_horizon=10,
-                                                                    data_stride_len=15,
-                                                                    files=files
-                                                                    )
-                test_dataset_forecast_short = MonashDatasetMultiFile(batch_size=batch_size,
-                                                                    data_split='test',
-                                                                    random_seed=RANDOM_SEED,
-                                                                    forecast_horizon=10,
-                                                                    data_stride_len=15,
-                                                                    files=files
-                                                                    )
-            else:
-                train_dataset_forecast_short = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
-                                                                forecast_horizon=10,
-                                                                data_stride_len=15
+        if all:
+            f = files
+            if files is not None and isinstance(files, dict):
+                f = files['forecasting_short']
+            train_dataset_forecast_short = MonashDatasetMultiFile(batch_size=batch_size,
+                                                                data_split='train',
+                                                                random_seed=RANDOM_SEED,
+                                                                forecast_horizon=8,
+                                                                data_stride_len=15,
+                                                                files=f
                                                                 )
-                test_dataset_forecast_short = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
-                                                                forecast_horizon=10,
-                                                                data_stride_len=15
+            test_dataset_forecast_short = MonashDatasetMultiFile(batch_size=batch_size,
+                                                                data_split='test',
+                                                                random_seed=RANDOM_SEED,
+                                                                forecast_horizon=8,
+                                                                data_stride_len=15,
+                                                                files=f
                                                                 )
+        else:
+            train_dataset_forecast_short = InformerDataset(data_split="train", random_seed=RANDOM_SEED,
+                                                            forecast_horizon=8,
+                                                            data_stride_len=15
+                                                            )
+            test_dataset_forecast_short = InformerDataset(data_split="test", random_seed=RANDOM_SEED,
+                                                            forecast_horizon=8,
+                                                            data_stride_len=15
+                                                            )
 
-            train_datasets['forecasting_short'] = train_dataset_forecast_short
-            test_datasets['forecasting_short'] = test_dataset_forecast_short
+        train_datasets['forecasting_short'] = train_dataset_forecast_short
+        test_datasets['forecasting_short'] = test_dataset_forecast_short
 
 
     if all:

@@ -6,6 +6,7 @@ import torch
 import wandb
 
 from momentfm import MOMENTPipeline
+# from momentfm.models.moment_original import MOMENTPipeline
 from momentfm.utils.masking import Masking
 
 from main import DEVICE
@@ -27,7 +28,7 @@ def zero_shot(train_loader, test_loader, name='', **kwargs):
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizon': 96,
+            'forecast_horizons': (96, 8),
             # 'prefix_tuning': False,
             # 'prefix_tuning_multi': False,
             # 'MPT': True,
@@ -61,7 +62,8 @@ def prompt_tuning(train_loader, test_loader, name='',
                   prefix_tuning_multi=False,
                   MPT=False,
                   no_train_forehead=False,
-                  epochs=400):
+                  epochs=400,
+                  multivariate_projection='attention'):
     """
     prompt tuning
     """
@@ -81,21 +83,21 @@ def prompt_tuning(train_loader, test_loader, name='',
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizon': 96,
+            'forecast_horizons': (96, 8),
             # 'prefix_tuning': True,
             'prefix_tuning_multi': prefix_tuning_multi,
             'MPT': MPT,
             'num_prefix': 16,
             'task_names': list(next(iter(train_loader)).keys()),
-            'multivariate_projection': 'attention',
+            'multivariate_projection': multivariate_projection,
             }
     ).to(DEVICE)
     model.init()
 
 
     # need to freeze head manually
-    for name, param in model.named_parameters():
-        if 'prefix' not in name and 'prompt' not in name and 'fore_head' not in name and 'mpt' not in name:
+    for n, param in model.named_parameters():
+        if 'prefix' not in n and 'prompt' not in n and 'fore_head' not in n and 'mpt' not in n:
             param.requires_grad = False
 
     if no_train_forehead:
@@ -103,13 +105,13 @@ def prompt_tuning(train_loader, test_loader, name='',
             param.requires_grad = False
 
     # print frozen params
-    for name, param in model.named_parameters():
+    for n, param in model.named_parameters():
         if param.requires_grad:
-            print(name)
+            print(n)
 
-    # sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
-    model = train(model, train_loader, test_loader, max_epoch=epochs)
+    model = train(model, train_loader, test_loader, max_epoch=epochs, identifier=name)
 
     wandb.finish()
 
@@ -134,10 +136,12 @@ def finetune(train_loader, test_loader, name='', epochs=400, **kwargs):
         # For imputation, we will load MOMENT in `reconstruction` mode
         model_kwargs={
             'task_name': 'reconstruction',
+            # 'task_name': 'forecasting',
             'freeze_encoder': False, # Freeze the patch embedding layer
             'freeze_embedder': False, # Freeze the transformer encoder
             'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizon': 96,
+            'forecast_horizons': (96, 8),
+            # 'forecast_horizon': 96,
             # 'prefix_tuning': False,
             # 'prefix_tuning_multi': False,
             # 'MPT': True,
@@ -152,11 +156,13 @@ def finetune(train_loader, test_loader, name='', epochs=400, **kwargs):
         param.requires_grad = True
 
     # print frozen params
-    for name, param in model.named_parameters():
+    for n, param in model.named_parameters():
         if param.requires_grad:
-            print(name)
+            print(n)
 
-    model = train(model, train_loader, test_loader, max_epoch=epochs)
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+
+    model = train(model, train_loader, test_loader, max_epoch=epochs, identifier=name)
 
     wandb.finish()
 
