@@ -95,6 +95,7 @@ def prompt_tuning(train_loader, test_loader, name='',
     model.init()
 
 
+
     # need to freeze head manually
     for n, param in model.named_parameters():
         if 'prefix' not in n and 'prompt' not in n and 'fore_head' not in n and 'mpt' not in n:
@@ -112,6 +113,9 @@ def prompt_tuning(train_loader, test_loader, name='',
     print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     model = train(model, train_loader, test_loader, max_epoch=epochs, identifier=name)
+
+    model.push_to_hub(name.replace('/', '_'))
+
 
     wandb.finish()
 
@@ -163,6 +167,8 @@ def finetune(train_loader, test_loader, name='', epochs=400, **kwargs):
     print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     model = train(model, train_loader, test_loader, max_epoch=epochs, identifier=name)
+
+    model.push_to_hub(name.replace('/', '_'))
 
     wandb.finish()
 

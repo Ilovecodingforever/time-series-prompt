@@ -25,10 +25,13 @@ from main import DEVICE
 
 
 
-def step(model, batch, criterion, mask_generator,):
+def step(model, batch, criterion, mask_generator,
+         scaler=None, max_norm=None, optimizer=None):
     """
     one train / inference step
     """
+
+    # print(torch.cuda.max_memory_allocated())
 
     loss = 0
     losses = {}
@@ -36,6 +39,9 @@ def step(model, batch, criterion, mask_generator,):
     embedding = None
 
     for key, data in batch.items():
+
+        # if key != 'forecasting_short' and key != 'forecasting_long':
+        #     continue
 
         if key in ('imputation', 'anomaly', 'classify'):
 
@@ -60,8 +66,8 @@ def step(model, batch, criterion, mask_generator,):
 
             # Reshape to [batch_size * n_channels, 1, window_size]
             # batch_x = batch_x.reshape((-1, 1, 512)).to(DEVICE).float()
-            # batch_x = batch_x.to(DEVICE).float()
-            batch_x = batch_x.to(DEVICE).double()
+            batch_x = batch_x.to(DEVICE).float()
+            # batch_x = batch_x.to(DEVICE).double()
 
             batch_masks = batch_masks.to(DEVICE).long()
             batch_masks = batch_masks[:, None, :].repeat(1, n_channels, 1)
@@ -89,20 +95,20 @@ def step(model, batch, criterion, mask_generator,):
                 losses[key] += val.detach().cpu().numpy()
 
                 if key == 'classify':
-                    embedding = output.embeddings
-
-                    xs[key] = embedding.detach().cpu().numpy()
+                    xs[key] = output.embeddings.detach().cpu().numpy()
                     ys[key] = labels.detach().cpu().numpy()
+                    
+                    # del embedding
 
                 elif key == 'anomaly':
                     # We will use the Mean Squared Error (MSE) between the observed values and MOMENT's predictions as the anomaly score
-                    anomaly_scores = (batch_x - output.reconstruction)**2
-                    xs[key] = anomaly_scores.detach().cpu().numpy()
+                    xs[key] = ((batch_x - output.reconstruction)**2).detach().cpu().numpy()
                     ys[key] = labels.detach().cpu().numpy()
 
                 else:
                     raise NotImplementedError
 
+                # del labels
 
             elif key == 'imputation':
                 observed_mask = (batch_masks * (1 - mask))[:, None, :].repeat(1, n_channels, 1)  # mask: 0 not observed, 1 observed?
@@ -116,13 +122,17 @@ def step(model, batch, criterion, mask_generator,):
                 xs[key] = output.reconstruction[observed_mask == 1].detach().cpu().numpy()
                 ys[key] = batch_x[observed_mask == 1].detach().cpu().numpy()
 
+                # del observed_mask, masked_loss
+
             else:
                 raise NotImplementedError
 
+            # del batch_x, batch_masks, mask, recon_loss
 
         elif key in ('forecasting_short', 'forecasting_long'):
-            
+            # model.double()
             # torch.autograd.set_detect_anomaly(True)
+            # with torch.autocast(device_type="cuda", enabled=False):
 
             model.task_name = TASKS.FORECASTING
 
@@ -133,14 +143,14 @@ def step(model, batch, criterion, mask_generator,):
 
             timeseries, forecast, input_mask = data
             # Move the data to the GPU
-            # timeseries = timeseries.float().to(DEVICE)
-            timeseries = timeseries.double().to(DEVICE)
+            timeseries = timeseries.float().to(DEVICE)
+            # timeseries = timeseries.double().to(DEVICE)
             input_mask = input_mask.to(DEVICE)
-            # forecast = forecast.float().to(DEVICE)
-            forecast = forecast.double().to(DEVICE)
+            forecast = forecast.float().to(DEVICE)
+            # forecast = forecast.double().to(DEVICE)
 
-            with torch.cuda.amp.autocast():
-                output = model(timeseries, input_mask, task_name=key)
+            # with torch.cuda.amp.autocast():
+            output = model(timeseries, input_mask, task_name=key)
 
             val = criterion(output.forecast, forecast).mean()
 
@@ -152,16 +162,43 @@ def step(model, batch, criterion, mask_generator,):
             #         print(name)
             #         print(param)
 
+            # val = val.float()
+            
             loss += val
             losses[key] = val.detach().cpu().numpy()
 
-            xs[key] = output.forecast.detach().cpu().numpy()
-            ys[key] = forecast.detach().cpu().numpy()
+            xs[key] = output.forecast.float().detach().cpu().numpy()
+            ys[key] = forecast.float().detach().cpu().numpy()
+
+
+            # del timeseries, forecast, input_mask
 
         else:
             raise NotImplementedError
 
-    return loss, model, losses, xs, ys
+        # del output
+        # val = val.float()
+        if optimizer is not None:
+            # Scales the loss for mixed precision training
+            scaler.scale(val).backward()
+
+            # Clip gradients
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+        
+        model.float()
+
+    #     torch.cuda.empty_cache()
+    #     print(torch.cuda.max_memory_allocated())
+
+    # print(torch.cuda.max_memory_allocated())
+
+    return loss, model, losses, xs, ys, scaler, optimizer
+
 
 
 def get_performance(ys, xs, losses, task, curr_filename, clf=None, split='train', cur_epoch=0, log=True):
@@ -265,7 +302,7 @@ def evaluate(model, loader, criterion, mask_generator, split, cur_epoch, clfs=No
 
                 if task not in data:
                     break
-                loss, _, _, x, y = step(model, {task: data[task]}, criterion, mask_generator,)
+                loss, _, _, x, y, _, _ = step(model, {task: data[task]}, criterion, mask_generator,)
                 xs.append(x[task])
                 ys.append(y[task])
                 losses.append(loss.item())
@@ -335,7 +372,7 @@ def train(model, train_loader, test_loader,
     if not os.path.exists(logging_dir):
         os.makedirs(logging_dir)
 
-    model.double()
+    # model.double()
 
     train_bs = 0
     for data in train_loader:
@@ -359,12 +396,12 @@ def train(model, train_loader, test_loader,
             if out is None:
                 continue
             if not isinstance(out, torch.Tensor):
-                
+
                 for j, o in enumerate(out):
                     if torch.isnan(out[o]).any():
                         print("In", self.__class__.__name__)
                         raise RuntimeError(f"Found NAN in output {i} at indices: ", torch.isnan(out[o]).nonzero(), "where:", o[torch.isnan(out[o]).nonzero()[:, 0].unique(sorted=True)])
-            
+
                     if torch.isinf(out[o]).any():
                         print("In", self.__class__.__name__)
                         raise RuntimeError(f"Found INF in output {i} at indices: ", torch.isinf(out[o]).nonzero(), "where:", o[torch.isinf(out[o]).nonzero()[:, 0].unique(sorted=True)])
@@ -373,12 +410,12 @@ def train(model, train_loader, test_loader,
                 if nan_mask.any():
                     print("In", self.__class__.__name__)
                     raise RuntimeError(f"Found NAN in output {i} at indices: ", nan_mask.nonzero(), "where:", out[nan_mask.nonzero()[:, 0].unique(sorted=True)])
-                
+
                 inf_mask = torch.isinf(out)
                 if inf_mask.any():
                     print("In", self.__class__.__name__)
                     raise RuntimeError(f"Found INF in output {i} at indices: ", inf_mask.nonzero(), "where:", out[inf_mask.nonzero()[:, 0].unique(sorted=True)])
-                
+
     # for submodule in model.modules():
     #     submodule.register_forward_hook(nan_hook)
 
@@ -403,27 +440,31 @@ def train(model, train_loader, test_loader,
 
         n_b = 0
         for data in it:
+            n_b += 1
+
+            # if n_b < 1600:
+            #     continue
 
             # continue
-            temp = deepcopy(model)
+            # temp = deepcopy(model)
 
-            loss, model, loss_dict, _, _ = step(model, data, criterion, mask_generator,)
+            loss, model, loss_dict, _, _, scaler, optimizer = step(model, data, criterion, mask_generator, scaler, max_norm, optimizer)
+            # print(torch.cuda.max_memory_allocated())
 
-            # Scales the loss for mixed precision training
-            scaler.scale(loss).backward()
+            # # Scales the loss for mixed precision training
+            # scaler.scale(loss).backward()
 
-            # Clip gradients
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            # # Clip gradients
+            # scaler.unscale_(optimizer)
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad(set_to_none=True)
+            # scaler.step(optimizer)
+            # scaler.update()
+            # optimizer.zero_grad(set_to_none=True)
 
             losses.append(loss.item())
             loss_dicts.append(loss_dict)
 
-            n_b += 1
             # if n_b  == 10:
             #     break
 

@@ -74,7 +74,7 @@ import torch
 
 from momentfm.utils.utils import control_randomness
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 
@@ -302,6 +302,7 @@ def multitask_experiments(experiment_name, epochs=20):
         "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TEST.ts",
         "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TRAIN.ts")
 
+
     experiment_files['anomaly'] = (
                                    '/zfsauton/project/public/Mononito/TimeseriesDatasets/anomaly_detection/TSB-UAD-Public/MITDB',
                                 #    '/zfsauton/project/public/Mononito/TimeseriesDatasets/anomaly_detection/TSB-UAD-Public/ECG'  # TOO big
@@ -345,8 +346,8 @@ if __name__ == "__main__":
 
     # classify_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)  # this one probably needs larger gpu
     # imputation_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)
-    long_forecast_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)
-    # multitask_experiments(EXPERIMENT_NAME, epochs=20)
+    # long_forecast_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)
+    multitask_experiments(EXPERIMENT_NAME, epochs=20)
 
     # TODO: short horizon loss should be smape
     # TODO: all data similar size
