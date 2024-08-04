@@ -126,6 +126,7 @@ class AnomalyDetectionDatasetMultiFile(torch.utils.data.IterableDataset):
                 self._read_data(filename)
 
                 # make sure that one batch don't contain different datasets (channel size mixup)
+                # TODO: append nan to make it same size?
                 num = (self.length_timeseries // self.data_stride_len) + 1
                 num = num // self.batch_size * self.batch_size
 
@@ -312,11 +313,29 @@ class InformerDatasetMultiFile(torch.utils.data.IterableDataset):
         self.random_seed = random_seed
 
 
-    def _get_borders(self):
+    def _get_borders(self, filename):
+        self.train_ratio = 0.6
+        self.val_ratio = 0.1
+        self.test_ratio = 0.3
+        
+        # n_train = math.floor(self.length_timeseries_original * 0.6)
+        # n_val = math.floor(self.length_timeseries_original * 0.1)
+        # n_test = math.floor(self.length_timeseries_original * 0.3)
 
-        n_train = math.floor(self.length_timeseries_original * 0.6)
-        n_val = math.floor(self.length_timeseries_original * 0.1)
-        n_test = math.floor(self.length_timeseries_original * 0.3)
+        if "ETTm" in filename:
+            n_train = 12 * 30 * 24 * 4
+            n_val = 4 * 30 * 24 * 4
+            n_test = 4 * 30 * 24 * 4
+
+        elif "ETTh" in filename:
+            n_train = 12 * 30 * 24
+            n_val = 4 * 30 * 24
+            n_test = 4 * 30 * 24
+
+        else:
+            n_train = int(self.train_ratio * self.length_timeseries_original)
+            n_test = int(self.test_ratio * self.length_timeseries_original)
+            n_val = self.length_timeseries_original - n_train - n_test
 
         train_end = n_train
         val_end = n_train + n_val
@@ -342,7 +361,7 @@ class InformerDatasetMultiFile(torch.utils.data.IterableDataset):
         df.drop(columns=["date"], inplace=True)
         df = df.infer_objects(copy=False).interpolate(method="cubic")
 
-        data_splits = self._get_borders()
+        data_splits = self._get_borders(filename)
 
         train_data = df[data_splits[0]]
         self.scaler.fit(train_data.values)
@@ -468,6 +487,15 @@ class MonashDatasetMultiFile(InformerDatasetMultiFile):
         elif self.data_split == "test":
             df = df.iloc[int(len(df) * 0.7):]
 
+        # TODO: why does research code do this? https://github.com/moment-timeseries-foundation-model/moment-research/blob/main/moment/data/forecasting_datasets.py
+        # if self.data_split == "train":
+        #     self.data = df.iloc[data_splits.train, :]
+        # elif self.data_split == "val":
+        #     self.data = df.iloc[data_splits.val, :]
+        # elif self.data_split == "test":
+        #     self.data = df.iloc[data_splits.test, :]
+
+
 
         # self.data = [np.array(s).reshape(1, -1) for s in df['series_value'].values]
 
@@ -503,38 +531,98 @@ class MonashDatasetMultiFile(InformerDatasetMultiFile):
 
             for d in self.data:
                 # TODO: do scaler only on training
+                # even the research code does it on whole dataset
                 self.scaler.fit(d)
-                d = self.scaler.transform(d)
+                timeseries = self.scaler.transform(d).flatten()
 
-                num = (
-                    len(d) - self.seq_len - self.forecast_horizon
-                ) // self.data_stride_len + 1
+                if len(timeseries) <= self.forecast_horizon:
+                    continue
 
-                if num < 0:
-                    # print("data too short")
-                    num = 1
+                input_mask = np.ones(self.seq_len)
+                forecast = timeseries[-self.forecast_horizon :]
+                timeseries = timeseries[: -self.forecast_horizon]
 
-                num = num // self.batch_size * self.batch_size
-                for index in range(num):
+                timeseries_len = len(timeseries)
 
-                    seq_start = self.data_stride_len * index
-                    seq_end = seq_start + self.seq_len
-                    input_mask = np.ones(self.seq_len)
+                if timeseries_len <= self.seq_len:
+                    timeseries, input_mask = upsample_timeseries(
+                        timeseries,
+                        self.seq_len,
+                        direction='backward',
+                        sampling_type='pad',
+                        mode='constant',
+                    )
 
-                    pred_end = seq_end + self.forecast_horizon
+                elif timeseries_len > self.seq_len:
+                    timeseries, input_mask = downsample_timeseries(
+                        timeseries, self.seq_len, sampling_type='last'
+                    )
 
-                    # TODO: check if this is correct
-                    if len(d) < self.seq_len:
-                        d = np.pad(d, ((self.seq_len + pred_end - len(d), 0), (0, 0)))
-                        input_mask[: self.seq_len + pred_end - len(d)] = 0
+                yield timeseries.reshape((1, self.seq_len)), forecast.reshape((1, self.forecast_horizon)), input_mask
 
-                    if pred_end > len(d):
-                        pred_end = len(d)
-                        seq_end = seq_end - self.forecast_horizon
-                        seq_start = seq_end - self.seq_len
 
-                    assert(seq_start >=0 and seq_end >= 0 and pred_end >= 0)
-                    timeseries = d[seq_start:seq_end, :].T
-                    forecast = d[seq_end:pred_end, :].T
+import numpy.typing as npt
 
-                    yield timeseries, forecast, input_mask
+def upsample_timeseries(
+    timeseries: npt.NDArray,
+    seq_len: int,
+    sampling_type: str = "pad",
+    direction: str = "backward",
+    **kwargs,
+) -> npt.NDArray:
+    timeseries_len = len(timeseries)
+    input_mask = np.ones(seq_len)
+
+    if timeseries_len >= seq_len:
+        return timeseries, input_mask
+
+    if sampling_type == "interpolate":
+        timeseries = interpolate_timeseries(timeseries, seq_len)
+    elif sampling_type == "pad" and direction == "forward":
+        timeseries = np.pad(timeseries, (0, seq_len - timeseries_len), **kwargs)
+        input_mask[: seq_len - timeseries_len] = 0
+    elif sampling_type == "pad" and direction == "backward":
+        timeseries = np.pad(timeseries, (seq_len - timeseries_len, 0), **kwargs)
+        input_mask[: seq_len - timeseries_len] = 0
+    else:
+        error_msg = "Direction must be one of 'forward' or 'backward'"
+        raise ValueError(error_msg)
+
+    assert len(timeseries) == seq_len, "Padding failed"
+    return timeseries, input_mask
+
+
+def downsample_timeseries(
+    timeseries: npt.NDArray, seq_len: int, sampling_type: str = "interpolate"
+):
+    input_mask = np.ones(seq_len)
+    if sampling_type == "last":
+        timeseries = timeseries[:seq_len]
+    elif sampling_type == "first":
+        timeseries = timeseries[seq_len:]
+    elif sampling_type == "random":
+        idx = np.random.randint(0, timeseries.shape[0] - seq_len)
+        timeseries = timeseries[idx : idx + seq_len]
+    elif sampling_type == "interpolate":
+        timeseries = interpolate_timeseries(timeseries, seq_len)
+    elif sampling_type == "subsample":
+        factor = len(timeseries) // seq_len
+        timeseries = timeseries[::factor]
+        timeseries, input_mask = upsample_timeseries(
+            timeseries, seq_len, sampling_type="pad", direction="forward"
+        )
+    else:
+        error_msg = "Mode must be one of 'last', 'random',\
+                'first', 'interpolate' or 'subsample'"
+        raise ValueError(error_msg)
+    return timeseries, input_mask
+
+
+def interpolate_timeseries(
+    timeseries: npt.NDArray, interp_length: int = 512
+) -> npt.NDArray:
+    x = np.linspace(0, 1, timeseries.shape[-1])
+    f = interp1d(x, timeseries)
+    x_new = np.linspace(0, 1, interp_length)
+    timeseries = f(x_new)
+    return timeseries

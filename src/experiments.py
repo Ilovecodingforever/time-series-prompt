@@ -91,7 +91,7 @@ def prompt_tuning(train_loader, test_loader, name='',
             'task_names': list(next(iter(train_loader)).keys()),
             'multivariate_projection': multivariate_projection,
             }
-    ).to(DEVICE)
+    )
     model.init()
 
 
@@ -114,8 +114,10 @@ def prompt_tuning(train_loader, test_loader, name='',
 
     model = train(model, train_loader, test_loader, max_epoch=epochs, identifier=name)
 
-    model.push_to_hub(name.replace('/', '_'))
-
+    try:
+        model.push_to_hub(name.replace('/', '_'))
+    except Exception as e:
+        print(e)
 
     wandb.finish()
 
@@ -152,7 +154,7 @@ def finetune(train_loader, test_loader, name='', epochs=400, **kwargs):
             'num_prefix': 2,
             'task_names': list(next(iter(train_loader)).keys()),
             }
-    ).to(DEVICE)
+    )
     model.init()
 
 
@@ -168,7 +170,10 @@ def finetune(train_loader, test_loader, name='', epochs=400, **kwargs):
 
     model = train(model, train_loader, test_loader, max_epoch=epochs, identifier=name)
 
-    model.push_to_hub(name.replace('/', '_'))
+    try:
+        model.push_to_hub(name.replace('/', '_'))
+    except Exception as e:
+        print(e)
 
     wandb.finish()
 

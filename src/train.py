@@ -342,11 +342,24 @@ def train(model, train_loader, test_loader,
           # Gradient clipping value
           max_norm = 5.0,
           max_epoch = 400, max_lr = 1e-2,
-          identifier=None
+          identifier=None, log=True
           ):
     """
     prompt tuning
     """
+
+    train_bs = 0
+    for data in train_loader:
+        train_bs += 1
+    train_loader.bs = train_bs
+
+    test_bs = 0
+    for data in test_loader:
+        test_bs += 1
+    test_loader.bs = test_bs
+    
+    print("train counts", train_loader.dataset.counts)
+    print("test counts", test_loader.dataset.counts)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scheduler = None
@@ -373,17 +386,6 @@ def train(model, train_loader, test_loader,
         os.makedirs(logging_dir)
 
     # model.double()
-
-    train_bs = 0
-    for data in train_loader:
-        train_bs += 1
-    train_loader.bs = train_bs
-
-    test_bs = 0
-    for data in test_loader:
-        test_bs += 1
-    test_loader.bs = test_bs
-
 
     # https://discuss.pytorch.org/t/finding-source-of-nan-in-forward-pass/51153/3
     def nan_hook(self, inp, output):
@@ -418,7 +420,6 @@ def train(model, train_loader, test_loader,
 
     # for submodule in model.modules():
     #     submodule.register_forward_hook(nan_hook)
-
 
 
     for cur_epoch in range(max_epoch):
@@ -464,10 +465,9 @@ def train(model, train_loader, test_loader,
 
             losses.append(loss.item())
             loss_dicts.append(loss_dict)
-
             # if n_b  == 10:
             #     break
-
+        
         print(train_loader.dataset.counts)
 
         losses = np.array(losses)
@@ -481,12 +481,18 @@ def train(model, train_loader, test_loader,
 
         print(f"Epoch {cur_epoch}: Train loss: {average_loss:.3f}, Individual losses: {loss_dict}")
 
-        log = {
+        logging = {
             'train_loss': average_loss} | {
                 'train_'+key+'_loss': val for key, val in loss_dict.items()
                 }
-        wandb.log(log, step=cur_epoch)
-        print(log)
+        if log:
+            wandb.log(logging, step=cur_epoch)
+        print(logging)
+
+        # try:
+        #     model.push_to_hub('time-series-prompt_'+identifier.replace('/', '_')+'_'+str(cur_epoch), private=True)
+        # except Exception as e:
+        #     print(e)
 
         # Step the learning rate scheduler
         if scheduler is not None:
@@ -494,7 +500,7 @@ def train(model, train_loader, test_loader,
 
         # Evaluate the model on the test split
         model = inference(model, test_loader, criterion, cur_epoch, mask_generator, train_loader,
-                          logging_dir=logging_dir)
+                          logging_dir=logging_dir, log=log)
 
     return model
 

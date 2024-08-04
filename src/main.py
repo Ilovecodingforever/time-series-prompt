@@ -74,7 +74,7 @@ import torch
 
 from momentfm.utils.utils import control_randomness
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
 
@@ -109,14 +109,14 @@ def classify_experiments(experiment_name, multivariate_projection='attention', e
     batch_size = 1
 
     name = ''
-    if experiment_name == 'zero_shot':
+    if 'zero_shot' in experiment_name:
         experiment = zero_shot
-    elif experiment_name == 'finetune':
+    elif 'finetune' in experiment_name:
         experiment = finetune
-        name = 'finetune'
-    elif experiment_name == 'prompt_tuning':
+        name = experiment_name
+    elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = 'prompttune_'+multivariate_projection
+        name = experiment_name + '_'+multivariate_projection
     else:
         raise NotImplementedError
 
@@ -174,20 +174,20 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
     batch_size = 1
 
     name = ''
-    if experiment_name == 'zero_shot':
+    if 'zero_shot' in experiment_name:
         experiment = zero_shot
-    elif experiment_name == 'finetune':
+    elif 'finetune' in experiment_name:
         experiment = finetune
-        name = 'finetune'
-    elif experiment_name == 'prompt_tuning':
+        name = experiment_name
+    elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = 'prompttune_'+multivariate_projection
+        name = experiment_name + '_'+multivariate_projection
     else:
         raise NotImplementedError
 
 
     experiment_files = {
-        'ETTm1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv", ),
+        # 'ETTm1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv", ),
         'ETTm2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv", ),
         'ETTh1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv", ),
         'ETTh2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", ),
@@ -220,7 +220,7 @@ def long_forecast_experiments(experiment_name, multivariate_projection='attentio
     dataset_names = ['forecasting_long']
 
     informer_experiments(dataset_names, experiment_name, multivariate_projection=multivariate_projection, epochs=epochs)
-                    
+
 
 
 
@@ -249,14 +249,14 @@ def multitask_experiments(experiment_name, epochs=20):
     batch_size = 1
 
     name = ''
-    if experiment_name == 'zero_shot':
+    if 'zero_shot' in experiment_name:
         experiment = zero_shot
-    elif experiment_name == 'finetune':
+    elif 'finetune' in experiment_name:
         experiment = finetune
-        name = 'finetune'
-    elif experiment_name == 'prompt_tuning':
+        name = experiment_name
+    elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = 'prompttune'
+        name = experiment_name
     else:
         raise NotImplementedError
 
@@ -334,28 +334,34 @@ if __name__ == "__main__":
 
     # torch.autograd.set_detect_anomaly(True)
 
+    suffix = ''
+
     # os.environ["WANDB_MODE"] = "offline"
 
     # EXPERIMENT_NAME = 'zero_shot'
-    EXPERIMENT_NAME = 'prompt_tuning'
+    EXPERIMENT_NAME = 'prompttune'
     # EXPERIMENT_NAME = 'finetune'
+
+    EXPERIMENT_NAME = suffix + EXPERIMENT_NAME
 
     multivariate_projection = 'linear'
     # multivariate_projection = 'attention'
-    
+
 
     # classify_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)  # this one probably needs larger gpu
     # imputation_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)
-    # long_forecast_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)
-    multitask_experiments(EXPERIMENT_NAME, epochs=20)
+    long_forecast_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=20)
+    # multitask_experiments(EXPERIMENT_NAME, epochs=20)
 
     # TODO: short horizon loss should be smape
     # TODO: all data similar size
-    # TODO: average all performance for anomaly
+
+    # TODO: compare your multivariable code to itransformer
+    # TODO: save best model, using training data
 
 
-
-    
+    # TODO ablation:
+    # adding increasing number of channels
 
     # all = True
 
