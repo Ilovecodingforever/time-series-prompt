@@ -1,3 +1,9 @@
 [submodule "src/momentfm"]
 	path = src/momentfm
 	url = https://github.com/Ilovecodingforever/moment.git
+[submodule "chronos_forecasting"]
+	path = chronos_forecasting
+	url = https://github.com/Ilovecodingforever/chronos-forecasting.git
+[submodule "src/chronos_forecasting"]
+	path = src/chronos_forecasting
+	url = https://github.com/Ilovecodingforever/chronos-forecasting.git

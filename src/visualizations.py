@@ -258,17 +258,18 @@ def train_model(save_path="/home/scratch/mingzhul/classify_heartbeat"):
 if __name__ == '__main__':
     # train_model()
 
-    prefix_tuning_multi = False
-    MPT = True
+    prefix_tuning_multi = True
+    MPT = False
 
     assert prefix_tuning_multi ^ MPT, "Only one of prefix_tuning_multi and MPT can be True"
 
     if prefix_tuning_multi:
         # path = "ml233/time-series-prompt_prompttune_attention_imputation_ETTh2_19"
-        path = "/home/scratch/mingzhul/classify_heartbeat"
+        # path = "/home/scratch/mingzhul/classify_heartbeat"
+        path = "ml233/prompttune_attention_classify_Heartbeat"
 
-        loader, _ = get_data(batch_size=1, dataset_names=['classify'], all=True,
-                            #  files=("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", )
+        loader, _, _ = get_data(batch_size=1, dataset_names=['classify'], all=True,
+                            #  files=("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", )
                                 files=("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TRAIN.ts", )
                                 )
     else:
