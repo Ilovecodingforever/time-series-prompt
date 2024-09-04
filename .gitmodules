@@ -7,3 +7,9 @@
 [submodule "src/chronos_forecasting"]
 	path = src/chronos_forecasting
 	url = https://github.com/Ilovecodingforever/chronos-forecasting.git
+[submodule "mimic3_benchmarks"]
+	path = mimic3_benchmarks
+	url = https://github.com/Ilovecodingforever/mimic3-benchmarks.git
+[submodule "moment-research"]
+	path = moment-research
+	url = https://github.com/Ilovecodingforever/moment-research.git
