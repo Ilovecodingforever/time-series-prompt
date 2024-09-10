@@ -1,3 +1,39 @@
+
+
+
+strings = [
+"Epoch 0: test loss: 1.084, acc: 0.678, auc: 0.712, f1: 0.544, auprc: 0.223",
+"Epoch 0: test loss: 1.069, acc: 0.627, auc: 0.723, f1: 0.532, auprc: 0.257",
+"Epoch 0: test loss: 1.107, acc: 0.590, auc: 0.693, f1: 0.501, auprc: 0.229",
+"Epoch 0: test loss: 1.105, acc: 0.519, auc: 0.712, f1: 0.461, auprc: 0.244",
+"Epoch 0: test loss: 1.076, acc: 0.720, auc: 0.717, f1: 0.582, auprc: 0.236",
+
+"Epoch 0: test loss: 1.084, acc: 0.584, auc: 0.717, f1: 0.501, auprc: 0.253",
+"Epoch 0: test loss: 1.074, acc: 0.670, auc: 0.731, f1: 0.560, auprc: 0.254",
+"Epoch 0: test loss: 1.069, acc: 0.617, auc: 0.726, f1: 0.523, auprc: 0.240",
+"Epoch 0: test loss: 1.067, acc: 0.689, auc: 0.728, f1: 0.568, auprc: 0.254",
+"Epoch 0: test loss: 1.138, acc: 0.428, auc: 0.708, f1: 0.397, auprc: 0.236"
+]
+
+with open("Output.csv", "w") as text_file:
+    text_file.write("mse, mae, loss\n")
+    for s in strings:
+        # get the numbers from the string
+        numbers = [x.split(' ')[-1] for x in s.split(',')]
+
+        # write the numbers to the file
+        text_file.write(", ".join(map(str, numbers)) + "\n")
+
+
+
+
+
+
+
+
+
+
+
 import os
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 

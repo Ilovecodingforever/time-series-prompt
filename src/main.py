@@ -103,7 +103,7 @@ control_randomness(seed=RANDOM_SEED)
 def classify_experiments(experiment_name, multivariate_projection='attention', epochs=20,
                          save_model=False, bootstrap=False):
     from data import get_data
-    from experiments import zero_shot, finetune, prompt_tuning, lora
+    from experiments import zero_shot, finetune, prompt_tuning, lora, linearprobe
 
 
     multitask = False
@@ -179,10 +179,10 @@ def classify_experiments(experiment_name, multivariate_projection='attention', e
 
 
 def informer_experiments(dataset_names, experiment_name, multivariate_projection='attention', epochs=20,
-                         save_model=False, bootstrap=False):
+                         save_model=False, bootstrap=False, num_prefix=16):
 
     from data import get_data
-    from experiments import zero_shot, finetune, prompt_tuning, lora
+    from experiments import zero_shot, finetune, prompt_tuning, lora, linearprobe
 
 
     multitask = False
@@ -194,6 +194,9 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
     name = ''
     if 'zero_shot' in experiment_name:
         experiment = zero_shot
+    elif 'finetune_prompt' in experiment_name:
+        experiment = prompt_tuning
+        name = experiment_name
     elif 'finetune' in experiment_name:
         experiment = finetune
         name = experiment_name
@@ -202,6 +205,9 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
         name = experiment_name + '_'+multivariate_projection
     elif 'lora' in experiment_name:
         experiment = lora
+        name = experiment_name
+    elif 'linearprobe' in experiment_name:
+        experiment = linearprobe
         name = experiment_name
     else:
         raise NotImplementedError
@@ -214,7 +220,8 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
         # 'ETTh2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", ),
         # 'exchange_rate': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", ),
         'national_illness': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/national_illness.csv", ),
-                             [24, 60]),  # TODO: need forecast horizon 24 or 60
+                            #  [24, 60]),  # TODO: need forecast horizon 24 or 60
+                             [60])
     }
 
     for dataset_name, (files, horizons) in experiment_files.items():
@@ -224,6 +231,7 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
 
     random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
     time = str(datetime.datetime.now())
+    print('time', time)
 
 
     mask_ratios = [0.125, 0.25, 0.3, 0.375, 0.5]
@@ -257,23 +265,24 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
                     val_loader.dataset.reset()
                     test_loader.dataset.reset()
 
-                    model = experiment(train_loader, val_loader, test_loader, name_, time+'/'+str(seed),
+                    model = experiment(train_loader, val_loader, test_loader,
+                                       name=name_, extra=time+'/'+str(seed),
                                         prefix_tuning_multi=multivariable,
                                         MPT=multitask,
                                         no_train_forehead=no_train_forehead,
                                         epochs=epochs,
                                         multivariate_projection=multivariate_projection,
                                         save_model=save_model, forecast_horizon=horizon,
-                                        mask_ratio=mask_ratio,
+                                        mask_ratio=mask_ratio, num_prefix=num_prefix,
                                         )
 
 
-def long_forecast_experiments(experiment_name, multivariate_projection='attention', epochs=20, save_model=False, bootstrap=False):
+def long_forecast_experiments(experiment_name, multivariate_projection='attention', epochs=20, save_model=False, bootstrap=False, num_prefix=16):
 
     dataset_names = ['forecasting_long']
 
     informer_experiments(dataset_names, experiment_name, multivariate_projection=multivariate_projection, epochs=epochs,
-                         save_model=save_model, bootstrap=bootstrap)
+                         save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
 
 
 
@@ -387,6 +396,7 @@ def multitask_experiments(experiment_name, epochs=20, save_model=False):
 
 
 if __name__ == "__main__":
+
     from data import get_data
     from experiments import zero_shot, finetune, prompt_tuning
 
@@ -401,11 +411,18 @@ if __name__ == "__main__":
     EXPERIMENT_NAME = 'prompttune'
     # EXPERIMENT_NAME = 'finetune'
     # EXPERIMENT_NAME = 'lora'
+    # EXPERIMENT_NAME = 'linearprobe'
+    # EXPERIMENT_NAME = 'finetune_prompt'
+
 
     EXPERIMENT_NAME = suffix + EXPERIMENT_NAME
 
     # multivariate_projection = 'linear'
     multivariate_projection = 'attention'
+    # multivariate_projection = 'vanilla'
+    # multivariate_projection = 'residual'
+
+    num_prefix = 8
 
     bootstrap = True
 
@@ -416,7 +433,7 @@ if __name__ == "__main__":
     # imputation_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=epochs,
     #                       save_model=save_model, bootstrap=bootstrap)
     long_forecast_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=epochs,
-                              save_model=save_model, bootstrap=bootstrap)
+                              save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
     # multitask_experiments(EXPERIMENT_NAME, epochs=epochs, save_model=save_model)
 
 

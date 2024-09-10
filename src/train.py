@@ -502,7 +502,10 @@ def train(model, train_loader, val_loader, test_loader, extra='', mask_ratio=0.3
     """
     prompt tuning
     """
-
+    train_loader.dataset.reset()
+    val_loader.dataset.reset()
+    test_loader.dataset.reset()
+        
     train_bs = 0
     for data in train_loader:
         train_bs += 1
@@ -527,7 +530,7 @@ def train(model, train_loader, val_loader, test_loader, extra='', mask_ratio=0.3
     # if not isinstance(train_loader.dataset, torch.utils.data.IterableDataset):
     # Create a OneCycleLR scheduler
     total_steps = train_loader.bs * max_epoch * len(train_loader.dataset.tasks)
-    scheduler = OneCycleLR(optimizer, max_lr=5e-5, total_steps=total_steps, pct_start=0.3)
+    scheduler = OneCycleLR(optimizer, max_lr=0.01, total_steps=total_steps, pct_start=0.3)
 
     # the tutourial is wrong
     # criterion = torch.nn.MSELoss().to(DEVICE)

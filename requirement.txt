@@ -4,3 +4,4 @@ matplotlib
 wandb
 datasets
 peft
+torcheval

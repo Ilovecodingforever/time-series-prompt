@@ -24,6 +24,7 @@ sys.path.append('/zfsauton2/home/mingzhul/time-series-prompt')
 sys.path.append('/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks')
 
 from mimic3_benchmarks.mimic3benchmark.readers import InHospitalMortalityReader
+from mimic3_benchmarks.mimic3benchmark.readers import PhenotypingReader
 from mimic3_benchmarks.mimic3models.preprocessing import Discretizer, Normalizer
 from mimic3_benchmarks.mimic3models.in_hospital_mortality import utils
 
@@ -933,7 +934,7 @@ class MIMIC_mortality(torch.utils.data.Dataset):
 
     def __init__(self, data_split="train",
                  dir="/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/in-hospital-mortality",
-                 equal_length=False, small_part=True):
+                 equal_length=False, small_part=True, ordinal=False):
         """
         Parameters
         ----------
@@ -946,9 +947,10 @@ class MIMIC_mortality(torch.utils.data.Dataset):
             self.seq_len = 48
 
         self.data_split = data_split
-        self.dir =  dir
+        self.dir = dir
         self.equal_length = equal_length
         self.small_part = small_part
+        self.ordinal = ordinal
 
         self._read_data()
 
@@ -988,6 +990,9 @@ class MIMIC_mortality(torch.utils.data.Dataset):
         # else:
         self.raw = utils.load_data(reader, self.discretizer, self.normalizer, self.small_part, return_names=True)
 
+        self.data_indices = [i for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
+        self.columns = [x for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
+
             # np.max([len(x) for x in self.raw['data'][0]])
             # np.min([len(x) for x in self.raw['data'][0]])
             # np.mean([len(x) for x in self.raw['data'][0]])
@@ -998,31 +1003,57 @@ class MIMIC_mortality(torch.utils.data.Dataset):
             #     pickle.dump(self.raw, f)
 
 
+        # one hot to ordinal
+        if self.ordinal:
+            self.ordinal_data = []
 
+            used = set()
+            mylist =[x.split('->')[0] for x in self.columns]
+            unique = [x for x in mylist if x not in used and (used.add(x) or True)]
+            vars = [x.split('->')[0] for x in self.columns]
 
+            for i in range(len(self.raw['data'][0])):
+                row = []
+                for var in unique:
+                    idx = [i for i, x in enumerate(vars) if x == var]
+                    if len(idx) == 1:
+                        row.append(self.raw['data'][0][i][:, idx[0]])
+                    else:
+                        row.append(np.where(self.raw['data'][0][i][:, idx] == 1)[1])
+                row = np.array(row).T
+                self.ordinal_data.append(row)
 
+            # get normalizer
+            all = np.concatenate(self.ordinal_data, axis=0)
+            need_normalize = [x.split('->')[0] for i, x in enumerate(self.columns) if len(x.split('->'))>1 ]
+            idxs = set([i for i, x in enumerate(unique) if x in need_normalize])
 
+            # normalize
+            for i in range(len(self.ordinal_data)):
+                for j in idxs:
+                    self.ordinal_data[i][:, j] = (self.ordinal_data[i][:, j] - np.mean(all[:, j])) / np.std(all[:, j])
 
-
+            self.raw['data'] = list(self.raw['data'])
+            self.raw['data'][0] = self.ordinal_data
+        # pass
 
 
     def __getitem__(self, idx):
 
         data = self.raw['data'][0][idx]
-        label = self.raw['data'][1][idx]
+        label = np.array(self.raw['data'][1][idx]).reshape(-1)
 
         # include mask as features
         # TODO: expand mask to match the number of features
-        # timeseries = data
+        if self.ordinal:
+            timeseries = data
+        else:
+            timeseries = data[:, self.data_indices]
+            mask = np.delete(data, self.data_indices, axis=1)
 
-        data_indices = [i for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
-        columns = [x for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
-        timeseries = data[:, data_indices]
-        mask = np.delete(data, data_indices, axis=1)
-
-        column_mapping = [x.split('->')[0] for x in columns]
-        ids = [self.discretizer._channel_to_id[x] for x in column_mapping]
-        mask = mask[:, ids]
+            column_mapping = [x.split('->')[0] for x in self.columns]
+            ids = [self.discretizer._channel_to_id[x] for x in column_mapping]
+            mask = mask[:, ids]
 
         timeseries_len = timeseries.shape[0]
         if timeseries_len <= self.seq_len:
@@ -1056,6 +1087,153 @@ class MIMIC_mortality(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.raw['data'][0])
+
+
+
+
+class MIMIC_phenotyping(torch.utils.data.Dataset):
+
+    def __init__(self, data_split="train",
+                 dir="/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/phenotyping",
+                 equal_length=False, small_part=True, ordinal=False):
+        """
+        Parameters
+        ----------
+        data_split : str
+            Split of the dataset, 'train', 'val' or 'test'.
+        """
+
+        self.seq_len = 128
+        if equal_length:
+            self.seq_len = 48
+
+        self.data_split = data_split
+        self.dir = dir
+        self.equal_length = equal_length
+        self.small_part = small_part
+        self.ordinal = ordinal
+
+        self._read_data()
+
+
+    def _read_data(self):
+
+        # Build readers, discretizers, normalizers
+        folder = 'test' if self.data_split == 'test' else 'train'
+        reader = PhenotypingReader(dataset_dir=os.path.join(self.dir, folder),
+                                            listfile=os.path.join(self.dir,
+                                                                    f'{self.data_split}_listfile.csv'),)
+
+        self.discretizer = Discretizer(timestep=1.0,
+                                        store_masks=True,
+                                        impute_strategy='previous',
+                                        start_time='zero',
+                                        same_length=self.equal_length)
+
+        self.discretizer_header = self.discretizer.transform(reader.read_example(0)["X"])[1].split(',')
+        cont_channels = [i for (i, x) in enumerate(self.discretizer_header) if x.find("->") == -1]
+
+        self.normalizer = Normalizer(fields=cont_channels)  # choose here which columns to standardize
+        if self.equal_length:
+            normalizer_state = None
+        else:
+            normalizer_state = '/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/timestamp_pheno_ts-1.00_impute-previous_start-zero_masks-True_n-35621.normalizer'
+        normalizer_state = os.path.join(os.path.dirname(__file__), normalizer_state)
+        self.normalizer.load_params(normalizer_state)
+
+        self.raw = utils.load_data(reader, self.discretizer, self.normalizer, self.small_part, return_names=True)
+
+        self.data_indices = [i for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
+        self.columns = [x for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
+
+        # one hot to ordinal
+        if self.ordinal:
+            self.ordinal_data = []
+
+            used = set()
+            mylist =[x.split('->')[0] for x in self.columns]
+            unique = [x for x in mylist if x not in used and (used.add(x) or True)]
+            vars = [x.split('->')[0] for x in self.columns]
+
+            for i in range(len(self.raw['data'][0])):
+                row = []
+                for var in unique:
+                    idx = [i for i, x in enumerate(vars) if x == var]
+                    if len(idx) == 1:
+                        row.append(self.raw['data'][0][i][:, idx[0]])
+                    else:
+                        row.append(np.where(self.raw['data'][0][i][:, idx] == 1)[1])
+                row = np.array(row).T
+                self.ordinal_data.append(row)
+
+            # get normalizer
+            all = np.concatenate(self.ordinal_data, axis=0)
+            need_normalize = [x.split('->')[0] for i, x in enumerate(self.columns) if len(x.split('->'))>1 ]
+            idxs = set([i for i, x in enumerate(unique) if x in need_normalize])
+
+            # normalize
+            for i in range(len(self.ordinal_data)):
+                for j in idxs:
+                    self.ordinal_data[i][:, j] = (self.ordinal_data[i][:, j] - np.mean(all[:, j])) / np.std(all[:, j])
+
+            self.raw['data'] = list(self.raw['data'])
+            self.raw['data'][0] = self.ordinal_data
+
+
+
+    def __getitem__(self, idx):
+
+        data = self.raw['data'][0][idx]
+        label = np.array(self.raw['data'][1][idx])
+
+        # include mask as features
+        # TODO: expand mask to match the number of features
+
+        if self.ordinal:
+            timeseries = data
+        else:
+            timeseries = data[:, self.data_indices]
+            mask = np.delete(data, data_indices, axis=1)
+
+            column_mapping = [x.split('->')[0] for x in columns]
+            ids = [self.discretizer._channel_to_id[x] for x in column_mapping]
+            mask = mask[:, ids]
+
+        timeseries_len = timeseries.shape[0]
+        if timeseries_len <= self.seq_len:
+            timeseries, input_mask = upsample_timeseries(
+                timeseries,
+                self.seq_len,
+                direction='backward',
+                sampling_type='pad',
+                mode='constant',
+            )
+            # input_mask = np.repeat(input_mask.reshape(-1, 1), timeseries.shape[1], axis=1)
+            # input_mask[-len(mask):] = mask
+
+        elif timeseries_len > self.seq_len:
+            timeseries, input_mask = downsample_timeseries(
+                timeseries, self.seq_len, sampling_type='last'
+            )
+
+            # TODO: maybe mask the patch when the entire patch is missing
+            # input_mask = mask[-len(input_mask):]
+
+
+        # TODO: probably shouldn't use patches (patch size too big, and missing value mask probably doesn't work anymore). so repeat everything 8 times
+        # timeseries = np.repeat(timeseries, 8, axis=0)
+        # input_mask = np.repeat(input_mask, 8, axis=0)
+
+        input_mask = np.repeat(input_mask.reshape(-1, 1), timeseries.shape[1], axis=1)
+
+        return timeseries.T, input_mask.T, label
+
+
+    def __len__(self):
+        return len(self.raw['data'][0])
+
+
+
 
 
 if __name__ == '__main__':

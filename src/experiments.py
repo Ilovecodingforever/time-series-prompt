@@ -73,7 +73,8 @@ def zero_shot(train_loader, val_loader, test_loader, name='', extra='', **kwargs
 
 
 
-def prompt_tuning(train_loader, val_loader, test_loader, name='', extra='',
+def prompt_tuning(train_loader, val_loader, test_loader, 
+                  num_prefix=16, name='', extra='',
                   prefix_tuning_multi=False,
                   MPT=False,
                   no_train_forehead=False,
@@ -93,6 +94,9 @@ def prompt_tuning(train_loader, val_loader, test_loader, name='', extra='',
 
 
     n_channels = 1
+
+    n_channels = next(iter(train_loader.dataset.datasets['forecasting_long']))[0].shape[0]
+
     num_classes = 1
     if 'classify' in train_loader.dataset.datasets:
         next(iter(train_loader))
@@ -113,7 +117,7 @@ def prompt_tuning(train_loader, val_loader, test_loader, name='', extra='',
             # 'prefix_tuning': True,
             'prefix_tuning_multi': prefix_tuning_multi,
             'MPT': MPT,
-            'num_prefix': 16,
+            'num_prefix': num_prefix,
             'task_names': list(next(iter(train_loader)).keys()),
             'multivariate_projection': multivariate_projection,
             'n_channels': n_channels,
@@ -122,12 +126,11 @@ def prompt_tuning(train_loader, val_loader, test_loader, name='', extra='',
     )
     model.init()
 
-
-
-    # need to freeze head manually
-    for n, param in model.named_parameters():
-        if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
-            param.requires_grad = False
+    if not 'finetune' in name:
+        # need to freeze head manually
+        for n, param in model.named_parameters():
+            if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
+                param.requires_grad = False
 
     if no_train_forehead:
         for param in model.fore_head.parameters():
@@ -159,7 +162,8 @@ def prompt_tuning(train_loader, val_loader, test_loader, name='', extra='',
 
 def finetune(train_loader, val_loader, test_loader, name='', extra='',
              epochs=400, save_model=False,
-             lora=False, forecast_horizon=96,
+             lora=False, linearprobe=False,
+             forecast_horizon=96,
              mask_ratio=0.3,
              **kwargs):
     """
@@ -192,7 +196,7 @@ def finetune(train_loader, val_loader, test_loader, name='', extra='',
             # 'prefix_tuning': False,
             # 'prefix_tuning_multi': False,
             # 'MPT': True,
-            'num_prefix': 2,
+            'num_prefix': 16,
             'task_names': list(next(iter(train_loader)).keys()),
             'n_channels': n_channels,
             'num_class': num_classes,
@@ -204,20 +208,28 @@ def finetune(train_loader, val_loader, test_loader, name='', extra='',
     for param in model.parameters():
         param.requires_grad = True
 
+    # # linear probe
+    # for n, param in model.named_parameters():
+    #     if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
+    #         param.requires_grad = False
 
     if lora:
         from peft import LoraConfig, get_peft_model
 
         config = LoraConfig(
-            r=16,
+            r=4,
             lora_alpha=16,
-            target_modules=["q", "v"],
+            target_modules=["q", "v"], # https://github.com/huggingface/peft/blob/39ef2546d5d9b8f5f8a7016ec10657887a867041/src/peft/utils/other.py#L220
             lora_dropout=0.1,
-            bias="none",
-            modules_to_save=["fore_head_long", "fore_head_short", "head", "emb_head", "classification_head"],
+            # bias="none",
+            modules_to_save=["value_embedding", "layer_norm", "fore_head_long", "classification_head"],
         )
         model = get_peft_model(model, config)
-
+    
+    if linearprobe:
+        for n, param in model.named_parameters():
+            if 'head' not in n:
+                param.requires_grad = False
 
 
     # print frozen params
@@ -249,8 +261,17 @@ def lora(train_loader, val_loader, test_loader, name='', extra='', epochs=400, s
 
 
     return finetune(train_loader, val_loader, test_loader, name=name, extra=extra,
-                    epochs=epochs, save_model=save_model, lora=True,
+                    epochs=epochs, save_model=save_model, lora=True, linearprobe=False,
                     forecast_horizon=forecast_horizon, **kwargs)
 
+
+
+def linearprobe(train_loader, val_loader, test_loader, name='', extra='', epochs=400, save_model=False, forecast_horizon=96,
+             **kwargs):
+
+
+    return finetune(train_loader, val_loader, test_loader, name=name, extra=extra,
+                    epochs=epochs, save_model=save_model, lora=False, linearprobe=True,
+                    forecast_horizon=forecast_horizon, **kwargs)
 
 

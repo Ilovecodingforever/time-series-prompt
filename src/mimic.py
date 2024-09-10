@@ -4,7 +4,7 @@ mimic mortality prediction
 
 import sys
 sys.path.append('/zfsauton2/home/mingzhul/time-series-prompt/src/momentfm')
-
+sys.path.append('/zfsauton2/home/mingzhul/time-series-prompt/moment-research')
 
 
 import os
@@ -31,76 +31,165 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 
-def load_data(equal_length=False, small_part=True):
+def load_data(equal_length=False, small_part=True, benchmark='mortality', ordinal=False):
     from ts_datasets import MIMIC_mortality  # TODO: this changes visible devices, why?
+    from ts_datasets import MIMIC_phenotyping
 
     # batch_size = 1
-    batch_size = 8
+    # batch_size = 16
+    batch_size = 4
     shuffle = True
 
-    train_data = MIMIC_mortality(data_split="train", equal_length=equal_length, small_part=small_part)
+
+    if benchmark == 'mortality':
+        train_data = MIMIC_mortality(data_split="train", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
+        val_data = MIMIC_mortality(data_split="val", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
+        test_data = MIMIC_mortality(data_split="test", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
+
+        if ordinal:
+            n_channels = 18
+        else:
+            n_channels = 60
+
+        n_classes = 1
+
+    elif benchmark == 'phenotyping':
+        train_data = MIMIC_phenotyping(data_split="train", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
+        val_data = MIMIC_phenotyping(data_split="val", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
+        test_data = MIMIC_phenotyping(data_split="test", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
+
+        if ordinal:
+            n_channels = 18
+        else:
+            n_channels = 60
+
+        n_classes = 25
+
+    else:
+        raise ValueError('benchmark not supported')
+
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=shuffle)
-
-    val_data = MIMIC_mortality(data_split="val", equal_length=equal_length, small_part=small_part)
     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=shuffle)
-
-    test_data = MIMIC_mortality(data_split="test", equal_length=equal_length, small_part=small_part)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=shuffle)
 
-    return train_loader, val_loader, test_loader
+    return train_loader, val_loader, test_loader, n_classes, n_channels
 
 
 
 
-def load_model(mode='finetune', equal_length=False,
-               num_prefix=1, visualize_attention=False, prompt='attention'):
+def load_model(num_classes, n_channels, model_name, mode='finetune', equal_length=False,
+               num_prefix=1, visualize_attention=False, multivariate_projection='attention'):
 
-    n_channels = 60
+    # n_channels = 60
+    # n_channels = 18
     # n_channels = 78
     if equal_length:
-        n_channels = 59
-    num_classes = 1
+        n_channels = n_channels - 1
+    # num_classes = 1
 
-    model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        model_kwargs={
-            'task_name': 'classification',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizons': (24, 8),
-            # 'num_prefix': 16,
-            'num_prefix': num_prefix,
-            'task_names': ['classify'],
-            'multivariate_projection': prompt,
-            'n_channels': n_channels,
-            'num_class': num_classes,
-            'prefix_tuning_multi': (mode == 'prompt'),
-            'seq_len': 48 if equal_length else 128,
-            'visualize_attention': visualize_attention,
-            }
-    )
-
-    model.init()
-
-    for param in model.parameters():
-        param.requires_grad = True
-
-    if mode == 'prompt':
-        for n, param in model.named_parameters():
-            if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
-                param.requires_grad = False
-
-    elif mode == 'lora':
-        config = LoraConfig(
-            r=16,
-            lora_alpha=16,
-            target_modules=["q", "v"],
-            lora_dropout=0.1,
-            bias="none",
-            modules_to_save=["fore_head_long", "fore_head_short", "head", "emb_head", "classification_head"],
+    if model_name == 'moment':
+        model = MOMENTPipeline.from_pretrained(
+            "AutonLab/MOMENT-1-large",
+            model_kwargs={
+                'task_name': 'classification',
+                'freeze_encoder': False, # Freeze the patch embedding layer
+                'freeze_embedder': False, # Freeze the transformer encoder
+                'freeze_head': False, # The linear forecasting head must be trained
+                'forecast_horizons': (24, 8),
+                # 'num_prefix': 16,
+                'num_prefix': num_prefix,
+                'task_names': ['classify'],
+                'multivariate_projection': multivariate_projection,
+                'n_channels': n_channels,
+                'num_class': num_classes,
+                'prefix_tuning_multi': (mode == 'prompt' or mode == 'finetune_prompt'),
+                'seq_len': 48 if equal_length else 128,
+                'visualize_attention': visualize_attention,
+                }
         )
-        model = get_peft_model(model, config)
+        model.init()
+
+        for param in model.parameters():
+            param.requires_grad = True
+
+        if mode == 'prompt':
+            for n, param in model.named_parameters():
+                if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
+                    param.requires_grad = False
+
+        elif mode == 'lora':
+            from peft import LoraConfig, get_peft_model
+            config = LoraConfig(
+                r=2,
+                lora_alpha=16,
+                target_modules=["q", "v"], # https://github.com/huggingface/peft/blob/39ef2546d5d9b8f5f8a7016ec10657887a867041/src/peft/utils/other.py#L220
+                lora_dropout=0.1,
+                # bias="none",
+                modules_to_save=["value_embedding", "layer_norm", "fore_head_long", "classification_head"],
+            )
+            model = get_peft_model(model, config)
+
+        elif mode == 'linear_probe':
+            for n, param in model.named_parameters():
+                if 'head' not in n:
+                    param.requires_grad = False
+
+    elif model_name == 'gpt4ts':
+
+        config_path = "/zfsauton2/home/mingzhul/time-series-prompt/moment-research/configs/prompt/gpt4ts_classification.yaml"
+        gpu_id = 0
+        random_seed = 0
+        # lora = mode == 'lora'
+
+        from moment.utils.config import Config
+        from moment.utils.utils import control_randomness, parse_config
+        from moment.models.gpt4ts_prompt import GPT4TS_prompt
+        from moment.models.gpt4ts import GPT4TS
+
+        config = Config(
+            config_file_path=config_path, default_config_file_path="/zfsauton2/home/mingzhul/time-series-prompt/moment-research/configs/default.yaml"
+        ).parse()
+
+        config["device"] = gpu_id if torch.cuda.is_available() else "cpu"
+        args = parse_config(config)
+        args.shuffle = False
+
+
+        if mode == 'prompt':
+            args.model_name = "GPT4TS_prompt"
+            model = GPT4TS_prompt
+        else:
+            args.model_name = "GPT4TS"
+            model = GPT4TS
+        
+        assert(model != 'finetune_prompt') 
+
+        args.n_channels = n_channels
+        args.num_prefix = num_prefix
+        args.num_class = num_classes
+        args.seq_len = 128
+        if equal_length:
+            args.seq_len = 48
+        args.multivariate_projection = multivariate_projection
+
+        model = model(configs=args)
+        if mode == 'lora':
+            from peft import LoraConfig, get_peft_model
+
+            config = LoraConfig(
+                r=1,
+                lora_alpha=16,
+                # target_modules=["q", "v"],
+                lora_dropout=0.1,
+                # bias="none",
+                modules_to_save=["wpe", "enc_embedding", "ln", "predict_linear", "out_layer"],
+            )
+            model.gpt2 = get_peft_model(model.gpt2, config)
+
+        elif mode == 'linear_probe':
+            for n, param in model.named_parameters():
+                if 'predict_linear' not in n and 'out_layer' not in n and "enc_embedding" not in n:
+                    param.requires_grad = False
 
 
     # print frozen params
@@ -114,7 +203,6 @@ def load_model(mode='finetune', equal_length=False,
     model = model.to(DEVICE)
 
     return model
-
 
 
 
@@ -138,13 +226,12 @@ def step(model, batch, criterion,
     output = model(batch_x, input_mask=batch_masks, task_name='classify')
 
     # Compute loss
-    loss = criterion(output.logits.flatten(), labels)
+    loss = criterion(output.logits, labels)
 
     xs = output.logits.detach().cpu().numpy()
     ys = labels.detach().cpu().numpy()
 
     if optimizer is not None:
-
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -182,19 +269,20 @@ def train(model, train_loader, val_loader, test_loader,
     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5, weight_decay=0.05)
     # Create a OneCycleLR scheduler
     total_steps = len(train_loader) * max_epoch
-    scheduler = OneCycleLR(optimizer, max_lr=5e-5, total_steps=total_steps, pct_start=0.3)
+    scheduler = OneCycleLR(optimizer, max_lr=0.01, total_steps=total_steps, pct_start=0.3)
 
 
     # optimizer = torch.optim.AdamW(model.parameters(), lr=5e-6, weight_decay=0.05)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 30, eta_min=1e-7, last_epoch=-1, verbose='deprecated')
 
-    proportion = torch.tensor((len(train_loader.dataset.raw['data'][1]) - np.array(train_loader.dataset.raw['data'][1]).sum()) / np.array(train_loader.dataset.raw['data'][1]).sum())
+    labels = np.array(train_loader.dataset.raw['data'][1])
+    proportion = torch.tensor((len(labels) - np.sum(labels, axis=0)) / np.sum(labels, axis=0), device=DEVICE)
+
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=proportion)
 
-
     # Enable mixed precision training
-    scaler = torch.cuda.amp.GradScaler()
-
+    # scaler = torch.cuda.amp.GradScaler()
+    scaler = None
 
     best_val_loss = np.inf
     best_model = None
@@ -237,17 +325,26 @@ def get_metrics(probs, ys):
     # accuracy
     acc = np.mean((probs > 0.5) == ys)
     # auc
+    # TODO: average='weighted'?
     from sklearn.metrics import roc_auc_score
-    auroc = roc_auc_score(ys, probs)
+    auroc = roc_auc_score(ys, probs, average='macro')
     # F1
     from sklearn.metrics import f1_score
-    f1 = f1_score(ys, probs > 0.5)
+    f1 = f1_score(ys, probs > 0.5, average='macro')
     # AUPRC
-    from sklearn.metrics import precision_recall_curve, auc
-    (precisions, recalls, thresholds) = precision_recall_curve(ys, probs)
-    auprc = auc(recalls, precisions)
+    if ys.shape[1] == 1:
+        from sklearn.metrics import precision_recall_curve, auc
+        (precisions, recalls, thresholds) = precision_recall_curve(ys, probs)
+        auprc = auc(recalls, precisions)
+    else:
+        ys = torch.from_numpy(ys)
+        probs = torch.from_numpy(probs)
+        from torcheval.metrics import MultilabelAUPRC
+        metric = MultilabelAUPRC(num_labels=ys.shape[1], average='macro')
+        metric.update(probs, ys)
+        auprc = metric.compute().item()
 
-    return [acc, auroc, f1, auprc]    
+    return [acc, auroc, f1, auprc]
 
 
 
@@ -382,14 +479,14 @@ def logistic_regression(train_loader, val_loader, test_loader, random_state=0):
     train_x = train_x.reshape(train_x.shape[0], -1)
     val_x = val_x.reshape(val_x.shape[0], -1)
     test_x = test_x.reshape(test_x.shape[0], -1)
-    
+
     # use multilayer perceptron
     model = MLPClassifier(hidden_layer_sizes=(100, 100), max_iter=1000, random_state=random_state)
     model.fit(train_x, train_y)
-    
+
     # predict
     probs = model.predict_proba(test_x)[:, 1]
-    
+
 
     # # flatten
     # train_x = np.concatenate([np.mean(train_x, axis=2), np.min(train_x, axis=2), np.max(train_x, axis=2)], axis=1)
@@ -410,6 +507,12 @@ def logistic_regression(train_loader, val_loader, test_loader, random_state=0):
     return [acc, auroc, f1, auprc]
 
 
+def lr():
+    for seed in range(5):
+        control_randomness(seed=seed)
+        train_loader, val_loader, test_loader = load_data(equal_length=equal_length, small_part=small_part)
+        logistic_regression(train_loader, val_loader, test_loader, random_state=seed)
+
 
 
 
@@ -419,31 +522,31 @@ if __name__ == "__main__":
     # add time to equal length, use prompt?
 
     # linear prompts, ablation
-    # more baselines
+
+    # TODO: validation use less than 1000 samples
+
 
 
     equal_length = False
     small_part = True
+    ordinal = True
 
     # mode = 'finetune'
-    mode = 'prompt'
+    # mode = 'prompt'
     # mode = 'lora'
+    mode = 'linear_probe'
+    # mode = 'finetune_prompt'
 
+    # benchmark = 'mortality'
+    benchmark = 'phenotyping'
 
-    # prompt = 'attention'
-    prompt = 'linear'
+    # model_name = 'moment'
+    model_name = 'gpt4ts'
 
+    multivariate_projection = 'attention'
+    # multivariate_projection = 'vanilla'
 
-
-
-    for seed in range(5):
-        control_randomness(seed=seed)
-        train_loader, val_loader, test_loader = load_data(equal_length=equal_length, small_part=small_part)
-        logistic_regression(train_loader, val_loader, test_loader, random_state=seed)
-
-
-
-    num_prefix = 1
+    num_prefix = 4
 
 
     losses = []
@@ -453,12 +556,9 @@ if __name__ == "__main__":
 
         control_randomness(seed=seed)
 
-        model = load_model(mode=mode, equal_length=equal_length, num_prefix=num_prefix, prompt=prompt)
-        train_loader, val_loader, test_loader = load_data(equal_length=equal_length, small_part=small_part)
-
-
-        logistic_regression(train_loader, val_loader, test_loader, random_state=seed)
-
+        train_loader, val_loader, test_loader, n_classes, n_channels = load_data(equal_length=equal_length, small_part=small_part,
+                                                                                 benchmark=benchmark, ordinal=ordinal)
+        model = load_model(n_classes, n_channels, model_name, mode=mode, equal_length=equal_length, num_prefix=num_prefix, multivariate_projection=multivariate_projection,)
 
         model_weights, average_loss, metrics = train(model, train_loader, val_loader, test_loader)
         losses.append(average_loss)
@@ -470,7 +570,7 @@ if __name__ == "__main__":
         #     os.makedirs("/home/scratch/mingzhul/time-series-prompt/models")
         # torch.save(model_weights.state_dict(), f"/home/scratch/mingzhul/time-series-prompt/models/mimic_{mode}_{seed}.pt")
 
-    # model = load_model(mode=mode, equal_length=equal_length, num_prefix=num_prefix, visualize_attention=True)
+    # model = load_model(n_classes, mode=mode, equal_length=equal_length, num_prefix=num_prefix, visualize_attention=True)
     # model.load_state_dict(model_weights.state_dict())
     # multivariate_correlations(model, train_loader)
 

@@ -280,20 +280,31 @@ def bootstrap():
         # ('classify', 'performance/prompttune_attention/classify/SelfRegulationSCP1/2024-09-01 17:44:05.577610', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
         # ('classify', 'performance/prompttune_attention/classify/SelfRegulationSCP2/2024-09-01 17:44:05.577610', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
 
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-09-03 20:21:04.285046', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-03 20:21:04.285046', 'autoformer_national_illness.csv.pkl'),
-        
-        ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/24/2024-09-03 20:15:55.683563', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-03 20:15:55.683563', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-09-03 20:21:04.285046', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-03 20:21:04.285046', 'autoformer_national_illness.csv.pkl'),
 
-        ('forecasting_long', 'performance/lora/forecasting_long/national_illness/24/2024-09-03 20:16:19.252164', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/lora/forecasting_long/national_illness/60/2024-09-03 20:16:19.252164', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/24/2024-09-03 20:15:55.683563', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-03 20:15:55.683563', 'autoformer_national_illness.csv.pkl'),
+
+        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/24/2024-09-03 20:16:19.252164', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/60/2024-09-03 20:16:19.252164', 'autoformer_national_illness.csv.pkl'),
+
+        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/60/2024-09-08 20:12:59.571536', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-08 20:13:15.203941', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-08 21:36:39.457110', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting_long', 'performance/prompttune_vanilla/forecasting_long/national_illness/60/2024-09-08 21:36:05.233482', 'autoformer_national_illness.csv.pkl'),
+        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:33:41.174484', 'autoformer_national_illness.csv.pkl'),
+        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:33:52.473027', 'autoformer_national_illness.csv.pkl'),
+        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:11.150468', 'autoformer_national_illness.csv.pkl'),
+        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:27.959213', 'autoformer_national_illness.csv.pkl'),
+        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:46.877703', 'autoformer_national_illness.csv.pkl'),
+        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:57.845770', 'autoformer_national_illness.csv.pkl'),
 
         # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-09-01 17:24:14.836820', 'autoformer_national_illness.csv.pkl'),
         # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-01 17:24:14.836820', 'autoformer_national_illness.csv.pkl'),
-        
+
         # ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.25/2024-09-01 17:43:08.435420', 'autoformer_national_illness.csv.pkl'),
-        
+
         # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/24/2024-08-26 21:49:39.659517', 'autoformer_national_illness.csv.pkl'),
         # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/24/2024-08-26 21:49:53.871657', 'autoformer_national_illness.csv.pkl'),
         # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-08-26 21:49:29.051368', 'autoformer_national_illness.csv.pkl'),
@@ -363,19 +374,19 @@ def bootstrap():
     #     ('imputation', 'performance/finetune/imputation/national_illness/0.3/2024-08-29 16:16:08.102938', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/lora/imputation/national_illness/0.3/2024-08-29 16:16:19.034400', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.3/2024-08-29 16:15:49.955401', 'autoformer_national_illness.csv.pkl'),
-        
+
     #     ('imputation', 'performance/finetune/imputation/national_illness/0.5/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/lora/imputation/national_illness/0.5/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.5/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-        
+
     #     ('imputation', 'performance/finetune/imputation/national_illness/0.25/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/lora/imputation/national_illness/0.25/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.25/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-        
+
     #     ('imputation', 'performance/finetune/imputation/national_illness/0.125/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/lora/imputation/national_illness/0.125/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.125/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-        
+
     #     ('imputation', 'performance/finetune/imputation/national_illness/0.375/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/lora/imputation/national_illness/0.375/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
     #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.375/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
