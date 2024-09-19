@@ -418,13 +418,14 @@ class ClassificationDatasetMultiFile(torch.utils.data.IterableDataset):
     def _check_if_equal_length(self):
         if isinstance(self.data, list):
             n_timeseries = len(self.data)
+            
             self.n_channels = self.data[0].shape[0]
             # Assume all time-series have the same number of channels
             # Then we have time-series of unequal lengths
             max_len = max([ts.shape[-1] for ts in self.data])
             for i, ts in enumerate(self.data):
                 self.data[i] = interpolate_timeseries(
-                    timeseries=ts, interp_length=max_len
+                    timeseries=ts, interp_length=max_len, channel_first=True
                 )
             self.data = np.asarray(self.data)
             logging.info(
@@ -435,7 +436,7 @@ class ClassificationDatasetMultiFile(torch.utils.data.IterableDataset):
         if np.isnan(self.data).any():
             logging.info("NaNs detected. Imputing values...")
             self.data = interpolate_timeseries(
-                timeseries=self.data, interp_length=self.data.shape[-1]
+                timeseries=self.data, interp_length=self.data.shape[-1], channel_first=True
             )
             self.data = np.nan_to_num(self.data)
 
@@ -475,9 +476,11 @@ class ClassificationDatasetMultiFile(torch.utils.data.IterableDataset):
         # TODO: shuffle the data?
         idx = np.random.permutation(len(self.data))
 
-        self.data = self.data[idx]
+        if isinstance(self.data, np.ndarray):
+            self.data = self.data[idx]
+        else:
+            self.data = [self.data[i] for i in idx]
         self.labels = self.labels[idx]
-
 
 
         data_splits = self._get_borders()
@@ -917,10 +920,15 @@ def downsample_timeseries(
 
 
 def interpolate_timeseries(
-    timeseries: npt.NDArray, interp_length: int = 512
+    timeseries: npt.NDArray, interp_length: int = 512, channel_first=False,
 ) -> npt.NDArray:
-    x = np.linspace(0, 1, timeseries.shape[0])  # changed from timeseries.shape[-1]
-    f = interp1d(x, timeseries, axis=0)
+    # TODO: change this to match research code 
+    if channel_first:
+        x = np.linspace(0, 1, timeseries.shape[-1])
+        f = interp1d(x, timeseries)
+    else:
+        x = np.linspace(0, 1, timeseries.shape[0])  # changed from timeseries.shape[-1]    
+        f = interp1d(x, timeseries, axis=0)
     x_new = np.linspace(0, 1, interp_length)
     timeseries = f(x_new)
     return timeseries

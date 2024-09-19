@@ -274,139 +274,35 @@ def print_stuff(files):
 
 def bootstrap():
     dirs = [
-        # ('classify', 'performance/prompttune_attention/classify/AtrialFibrillation/2024-09-01 17:44:05.577610', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/Heartbeat/2024-09-01 17:44:05.577610', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/MotorImagery/2024-09-01 17:44:05.577610', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/SelfRegulationSCP1/2024-09-01 17:44:05.577610', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/SelfRegulationSCP2/2024-09-01 17:44:05.577610', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-09-03 20:21:04.285046', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-03 20:21:04.285046', 'autoformer_national_illness.csv.pkl'),
-
-        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/24/2024-09-03 20:15:55.683563', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-03 20:15:55.683563', 'autoformer_national_illness.csv.pkl'),
-
-        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/24/2024-09-03 20:16:19.252164', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/60/2024-09-03 20:16:19.252164', 'autoformer_national_illness.csv.pkl'),
-
-        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/60/2024-09-08 20:12:59.571536', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-08 20:13:15.203941', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-08 21:36:39.457110', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/prompttune_vanilla/forecasting_long/national_illness/60/2024-09-08 21:36:05.233482', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:33:41.174484', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:33:52.473027', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:11.150468', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:27.959213', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:46.877703', 'autoformer_national_illness.csv.pkl'),
-        ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-09 01:34:57.845770', 'autoformer_national_illness.csv.pkl'),
-
-        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-09-01 17:24:14.836820', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-09-01 17:24:14.836820', 'autoformer_national_illness.csv.pkl'),
-
-        # ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.25/2024-09-01 17:43:08.435420', 'autoformer_national_illness.csv.pkl'),
-
-        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/24/2024-08-26 21:49:39.659517', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/24/2024-08-26 21:49:53.871657', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/24/2024-08-26 21:49:29.051368', 'autoformer_national_illness.csv.pkl'),
-
-        # ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-08-26 21:49:39.659517', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/lora/forecasting_long/national_illness/60/2024-08-26 21:49:53.871657', 'autoformer_national_illness.csv.pkl'),
-        # ('forecasting_long', 'performance/prompttune_attention/forecasting_long/national_illness/60/2024-08-26 21:49:29.051368', 'autoformer_national_illness.csv.pkl'),
-
-        # ('imputation', 'performance/finetune/imputation/national_illness/2024-08-26 21:28:11.547372', 'autoformer_national_illness.csv.pkl'),
-        # ('imputation', 'performance/lora/imputation/national_illness/2024-08-26 21:28:29.032794', 'autoformer_national_illness.csv.pkl'),
-        # ('imputation', 'performance/prompttune_attention/imputation/national_illness/2024-08-26 21:27:47.516352', 'autoformer_national_illness.csv.pkl'),
-
-        # ('classify', 'performance/finetune/classify/AtrialFibrillation/2024-08-26 21:26:31.014668', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/finetune/classify/Heartbeat/2024-08-26 21:26:31.014668', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/finetune/classify/MotorImagery/2024-08-26 21:26:31.014668', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/finetune/classify/SelfRegulationSCP1/2024-08-26 21:26:31.014668', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/finetune/classify/SelfRegulationSCP2/2024-08-26 21:26:31.014668', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-        # ('classify', 'performance/lora/classify/AtrialFibrillation/2024-08-26 21:26:56.383705', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/lora/classify/Heartbeat/2024-08-26 21:26:56.383705', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/lora/classify/MotorImagery/2024-08-26 21:26:56.383705', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/lora/classify/SelfRegulationSCP1/2024-08-26 21:26:56.383705', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/lora/classify/SelfRegulationSCP2/2024-08-26 21:26:56.383705', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-        # ('classify', 'performance/prompttune_attention/classify/AtrialFibrillation/2024-08-26 21:24:59.688506', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/Heartbeat/2024-08-26 21:24:59.688506', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/MotorImagery/2024-08-26 21:24:59.688506', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/SelfRegulationSCP1/2024-08-26 21:24:59.688506', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/prompttune_attention/classify/SelfRegulationSCP2/2024-08-26 21:24:59.688506', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-        # ('classify', 'performance/classification_head_finetune/classify/AtrialFibrillation/2024-08-26 23:15:13.073625', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_finetune/classify/Heartbeat/2024-08-26 23:15:13.073625', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_finetune/classify/MotorImagery/2024-08-26 23:15:13.073625', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_finetune/classify/SelfRegulationSCP1/2024-08-26 23:15:13.073625', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_finetune/classify/SelfRegulationSCP2/2024-08-26 23:15:13.073625', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-        # ('classify', 'performance/classification_head_lora/classify/AtrialFibrillation/2024-08-26 23:15:04.212198', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_lora/classify/Heartbeat/2024-08-26 23:15:04.212198', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_lora/classify/MotorImagery/2024-08-26 23:15:04.212198', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_lora/classify/SelfRegulationSCP1/2024-08-26 23:15:04.212198', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_lora/classify/SelfRegulationSCP2/2024-08-26 23:15:04.212198', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-        # ('classify', 'performance/classification_head_prompttune_attention/classify/AtrialFibrillation/2024-08-26 23:13:20.069853', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_prompttune_attention/classify/Heartbeat/2024-08-26 23:13:20.069853', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_prompttune_attention/classify/MotorImagery/2024-08-26 23:13:20.069853', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_prompttune_attention/classify/SelfRegulationSCP1/2024-08-26 23:13:20.069853', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-        # ('classify', 'performance/classification_head_prompttune_attention/classify/SelfRegulationSCP2/2024-08-26 23:13:20.069853', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
+        ('forecasting_long', 'performance/finetune/forecasting_long/ETTh1/96/2024-09-14 12:29:12.019549', 'autoformer_ETTh1.csv.pkl'),
+        ('forecasting_long', 'performance/finetune/forecasting_long/ETTh2/96/2024-09-14 12:29:12.019549', 'autoformer_ETTh2.csv.pkl'),
+        ('forecasting_long', 'performance/finetune/forecasting_long/exchange_rate/96/2024-09-14 12:29:12.019549', 'autoformer_exchange_rate.csv.pkl'),
+        ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-14 12:29:12.019549', 'autoformer_national_illness.csv.pkl'),
     ]
 
-
-
-
-    # dirs = [
-    #     # ('classify', 'performance/classification_head_prompttune_attention/classify/AtrialFibrillation/2024-08-28 16:31:33.371617', 'AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl'),
-    #     # ('classify', 'performance/classification_head_prompttune_attention/classify/Heartbeat/2024-08-28 16:31:33.371617', 'Heartbeat_Heartbeat_TEST.ts.pkl'),
-    #     # ('classify', 'performance/classification_head_prompttune_attention/classify/MotorImagery/2024-08-28 16:31:33.371617', 'MotorImagery_MotorImagery_TEST.ts.pkl'),
-    #     # ('classify', 'performance/classification_head_prompttune_attention/classify/SelfRegulationSCP1/2024-08-28 16:31:33.371617', 'SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl'),
-    #     # ('classify', 'performance/classification_head_prompttune_attention/classify/SelfRegulationSCP2/2024-08-28 16:31:33.371617', 'SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'),
-
-    #     # ('forecasting_long', 'performance/promptfine_prompttune_attention/forecasting_long/national_illness/24/2024-08-28 23:53:03.236556', 'autoformer_national_illness.csv.pkl'),
-    #     # ('forecasting_long', 'performance/promptfine_prompttune_attention/forecasting_long/national_illness/60/2024-08-28 23:53:03.236556', 'autoformer_national_illness.csv.pkl'),
-
-    #     # ('imputation', 'performance/promptfine_finetune/imputation/national_illness/2024-08-29 15:35:02.798095', 'autoformer_national_illness.csv.pkl'),
-    #     # ('imputation', 'performance/promptfine_lora/imputation/national_illness/2024-08-29 15:35:18.275700', 'autoformer_national_illness.csv.pkl'),
-    #     # ('imputation', 'performance/promptfine_prompttune_attention/imputation/national_illness/2024-08-29 15:34:39.671138', 'autoformer_national_illness.csv.pkl'),
-
-    #     ('imputation', 'performance/finetune/imputation/national_illness/0.3/2024-08-29 16:16:08.102938', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/lora/imputation/national_illness/0.3/2024-08-29 16:16:19.034400', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.3/2024-08-29 16:15:49.955401', 'autoformer_national_illness.csv.pkl'),
-
-    #     ('imputation', 'performance/finetune/imputation/national_illness/0.5/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/lora/imputation/national_illness/0.5/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.5/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-
-    #     ('imputation', 'performance/finetune/imputation/national_illness/0.25/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/lora/imputation/national_illness/0.25/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.25/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-
-    #     ('imputation', 'performance/finetune/imputation/national_illness/0.125/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/lora/imputation/national_illness/0.125/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.125/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-
-    #     ('imputation', 'performance/finetune/imputation/national_illness/0.375/2024-08-29 16:36:55.212917', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/lora/imputation/national_illness/0.375/2024-08-29 16:36:26.546924', 'autoformer_national_illness.csv.pkl'),
-    #     ('imputation', 'performance/prompttune_attention/imputation/national_illness/0.375/2024-08-29 16:37:16.366414', 'autoformer_national_illness.csv.pkl'),
-    # ]
 
     for task, dir, filename in dirs:
         performances = []
         for seed in os.listdir(dir):
-            with open(f"{dir}/{seed}/test/0/{task}/{filename}", "rb") as f:
-                performance = pickle.load(f)
-                # print(performance)
-            performances.append(performance[task])
-
+            try:
+                with open(f"{dir}/{seed}/test/0/{task}/{filename}", "rb") as f:
+                    performance = pickle.load(f)
+                    # print(performance)
+                performances.append(performance[task])
+            except Exception as e:
+                print(e)
+                
         # calculate mean and std
         print(dir)
         mean = {}
         std = {}
-        for metric in performances[0]:
-            mean[metric] = np.mean([p[metric] for p in performances])
-            std[metric] = np.std([p[metric] for p in performances])
+        if len(performances) == 0:
+            mean = None
+            std = None
+        else:
+            for metric in performances[0]:
+                mean[metric] = np.mean([p[metric] for p in performances])
+                std[metric] = np.std([p[metric] for p in performances])
 
         print(mean)
         print(std)
@@ -434,15 +330,15 @@ if __name__ == "__main__":
     bootstrap()
 
     # files = [
-    #     'performance/prompttune_attention/forecasting_long/national_illness/24/2024-08-15 22:24:19.583583/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
+    #     'performance/linearprobe/forecasting_long/national_illness/24/2024-08-15 22:24:19.583583/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
     #     'performance/finetune/forecasting_long/national_illness/24/2024-08-15 22:23:25.783949/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
     #     'performance/lora/forecasting_long/national_illness/24/2024-08-15 22:23:35.614756/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
 
-    #     'performance/prompttune_attention/forecasting_long/national_illness/60/2024-08-15 22:29:16.904540/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
+    #     'performance/linearprobe/forecasting_long/national_illness/60/2024-08-15 22:29:16.904540/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
     #     'performance/finetune/forecasting_long/national_illness/60/2024-08-15 22:26:45.978880/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
     #     'performance/lora/forecasting_long/national_illness/60/2024-08-15 22:26:05.767002/test/0/forecasting_long/autoformer_national_illness.csv.pkl',
 
-    #     'performance/prompttune_attention/imputation/national_illness/2024-08-15 21:38:16.737470/test/0/imputation/autoformer_national_illness.csv.pkl',
+    #     'performance/linearprobe/imputation/national_illness/2024-08-15 21:38:16.737470/test/0/imputation/autoformer_national_illness.csv.pkl',
     #     'performance/finetune/imputation/national_illness/2024-08-15 21:37:22.016527/test/0/imputation/autoformer_national_illness.csv.pkl',
     #     'performance/lora/imputation/national_illness/2024-08-15 21:37:43.314456/test/0/imputation/autoformer_national_illness.csv.pkl',
 
@@ -458,11 +354,11 @@ if __name__ == "__main__":
     #     'performance/finetune/classify/SelfRegulationSCP1/2024-08-15 21:32:40.826703/test/0/classify/SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl',
     #     'performance/finetune/classify/SelfRegulationSCP2/2024-08-15 21:42:00.377426/test/0/classify/SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl',
 
-    #     'performance/prompttune_attention/classify/AtrialFibrillation/2024-08-15 21:30:58.081670/test/0/classify/AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl',
-    #     'performance/prompttune_attention/classify/Heartbeat/2024-08-15 21:56:31.430663/test/0/classify/Heartbeat_Heartbeat_TEST.ts.pkl',
-    #     'performance/prompttune_attention/classify/MotorImagery/2024-08-15 22:28:15.358816/test/0/classify/MotorImagery_MotorImagery_TEST.ts.pkl',
-    #     'performance/prompttune_attention/classify/SelfRegulationSCP1/2024-08-15 21:33:13.330513/test/0/classify/SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl',
-    #     'performance/prompttune_attention/classify/SelfRegulationSCP2/2024-08-15 21:46:10.648634/test/0/classify/SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'
+    #     'performance/linearprobe/classify/AtrialFibrillation/2024-08-15 21:30:58.081670/test/0/classify/AtrialFibrillation_AtrialFibrillation_TEST.ts.pkl',
+    #     'performance/linearprobe/classify/Heartbeat/2024-08-15 21:56:31.430663/test/0/classify/Heartbeat_Heartbeat_TEST.ts.pkl',
+    #     'performance/linearprobe/classify/MotorImagery/2024-08-15 22:28:15.358816/test/0/classify/MotorImagery_MotorImagery_TEST.ts.pkl',
+    #     'performance/linearprobe/classify/SelfRegulationSCP1/2024-08-15 21:33:13.330513/test/0/classify/SelfRegulationSCP1_SelfRegulationSCP1_TEST.ts.pkl',
+    #     'performance/linearprobe/classify/SelfRegulationSCP2/2024-08-15 21:46:10.648634/test/0/classify/SelfRegulationSCP2_SelfRegulationSCP2_TEST.ts.pkl'
     # ]
 
     # print_stuff(files)
@@ -472,7 +368,7 @@ if __name__ == "__main__":
     # print_mpt_performance("performance/MPT_prompttune", time='2024-07-31 10:59:58.071013')
     # print_mpt_performance("performance/MPT_finetune", time='2024-07-31 10:59:58.100640')
 
-    # print_multivariable_performance("performance/prompttune_attention")
+    # print_multivariable_performance("performance/linearprobe")
     # print_multivariable_performance("performance/finetune")
     # print_multivariable_performance("performance/lora")
     # print_multivariable_performance("performance/prompttune_linear")

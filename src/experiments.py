@@ -92,16 +92,17 @@ def prompt_tuning(train_loader, val_loader, test_loader,
         name=name,
     )
 
-
     n_channels = 1
-
-    n_channels = next(iter(train_loader.dataset.datasets['forecasting_long']))[0].shape[0]
-
     num_classes = 1
-    if 'classify' in train_loader.dataset.datasets:
+    if 'forecasting_long' in train_loader.dataset.datasets:
+        n_channels = next(iter(train_loader.dataset.datasets['forecasting_long']))[0].shape[0]
+        
+    elif 'classify' in train_loader.dataset.datasets:
         next(iter(train_loader))
         n_channels = train_loader.dataset.datasets['classify'].n_channels # TODO: this is not elegant
         num_classes = train_loader.dataset.datasets['classify'].num_classes
+    else:
+        raise ValueError('Dataset not supported')
 
     # imputation model
     model = MOMENTPipeline.from_pretrained(
@@ -125,8 +126,10 @@ def prompt_tuning(train_loader, val_loader, test_loader,
             }
     )
     model.init()
+    
+    # print(name)
 
-    if not 'finetune' in name:
+    if 'finetune' not in name:
         # need to freeze head manually
         for n, param in model.named_parameters():
             if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:

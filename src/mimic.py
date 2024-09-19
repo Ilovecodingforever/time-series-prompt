@@ -537,8 +537,8 @@ if __name__ == "__main__":
     mode = 'linear_probe'
     # mode = 'finetune_prompt'
 
-    # benchmark = 'mortality'
-    benchmark = 'phenotyping'
+    benchmark = 'mortality'
+    # benchmark = 'phenotyping'
 
     # model_name = 'moment'
     model_name = 'gpt4ts'
