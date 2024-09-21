@@ -125,7 +125,7 @@ def load_model(num_classes, n_channels, model_name, mode='finetune', equal_lengt
                 target_modules=["q", "v"], # https://github.com/huggingface/peft/blob/39ef2546d5d9b8f5f8a7016ec10657887a867041/src/peft/utils/other.py#L220
                 lora_dropout=0.1,
                 # bias="none",
-                modules_to_save=["value_embedding", "layer_norm", "fore_head_long", "classification_head"],
+                modules_to_save=["value_embedding", "layer_norm", "head"],
             )
             model = get_peft_model(model, config)
 

@@ -81,9 +81,6 @@ from momentfm.utils.utils import control_randomness
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
 
-
-
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RANDOM_SEED = 13
 
@@ -95,25 +92,24 @@ control_randomness(seed=RANDOM_SEED)
 
 
 
-def classify_experiments(experiment_name, multivariate_projection='attention', epochs=20,
-                         save_model=False, bootstrap=False, num_prefix=16):
+def classify_experiments(experiment_name: str,
+                         model_name: str,
+                         multivariate_projection: str = 'attention',
+                         epochs: int = 10,
+                         save_model: bool = False,
+                         bootstrap: bool = False,
+                         num_prefix: int = 16):
+
     from data import get_data
-    from experiments import zero_shot, finetune, prompt_tuning, lora, linearprobe
+    from experiments import finetune, prompt_tuning, lora, linearprobe
 
 
-    multitask = False
-    multivariable = True
-    no_train_forehead = False
-
-    dataset_names = ['classify']
-
+    task = 'classify'
 
     batch_size = 1
 
     name = ''
-    if 'zero_shot' in experiment_name:
-        experiment = zero_shot
-    elif 'finetune_prompt' in experiment_name:
+    if 'finetune_prompt' in experiment_name:
         experiment = prompt_tuning
         name = experiment_name
     elif 'finetune' in experiment_name:
@@ -133,101 +129,73 @@ def classify_experiments(experiment_name, multivariate_projection='attention', e
 
 
     # experiment_files = {
-    #     'AtrialFibrillation': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation_TEST.ts",
-    #                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation_TRAIN.ts"),
-    #     'SelfRegulationSCP1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TEST.ts",
-    #                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TRAIN.ts"),
-    #     'SelfRegulationSCP2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TEST.ts",
-    #                 "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TRAIN.ts"),
-    #     'Heartbeat': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TEST.ts",
-    #                 "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TRAIN.ts"),
-    #     'MotorImagery': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/MotorImagery/MotorImagery_TEST.ts",
-    #                 "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/MotorImagery/MotorImagery_TRAIN.ts"),
+    #     'AtrialFibrillation': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation",
+    #                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation"),
+    #     'SelfRegulationSCP1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1",
+    #                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1"),
+    #     'SelfRegulationSCP2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2",
+    #                 "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2"),
+    #     'Heartbeat': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat",
+    #                 "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat"),
+    #     'MotorImagery': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/MotorImagery/MotorImagery",
+    #                 "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/MotorImagery/MotorImagery"),
     #              }
 
     # from gpt4ts
     experiment_files = {
-        # 'FaceDetection': (
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/FaceDetection/FaceDetection_TEST.ts",
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/FaceDetection/FaceDetection_TRAIN.ts"),
-        # 'Handwriting': (
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Handwriting/Handwriting_TEST.ts",
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Handwriting/Handwriting_TRAIN.ts"),
-        # 'PEMS-SF': (
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/PEMS-SF/PEMS-SF_TEST.ts",
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/PEMS-SF/PEMS-SF_TRAIN.ts"),
-        # 'Heartbeat': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TEST.ts",
-        #             "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TRAIN.ts"),
-        
-        # 'EthanolConcentration': (
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/EthanolConcentration/EthanolConcentration_TEST.ts",
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/EthanolConcentration/EthanolConcentration_TRAIN.ts"),
-        'JapaneseVowels': (
-            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/JapaneseVowels/JapaneseVowels_TEST.ts",
-            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/JapaneseVowels/JapaneseVowels_TRAIN.ts"),
-        # 'SelfRegulationSCP1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TEST.ts",
-        #                        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TRAIN.ts"),
-        # 'SelfRegulationSCP2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TEST.ts",
-        #             "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TRAIN.ts"),
-        'SpokenArabicDigits': (
-            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SpokenArabicDigits/SpokenArabicDigits_TEST.ts",
-            "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SpokenArabicDigits/SpokenArabicDigits_TRAIN.ts"),
-        # 'UWaveGestureLibrary': (
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/UWaveGestureLibrary/UWaveGestureLibrary_TEST.ts",
-        #     "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/UWaveGestureLibrary/UWaveGestureLibrary_TRAIN.ts"),
+        'JapaneseVowels': "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/JapaneseVowels/JapaneseVowels",
+        'SelfRegulationSCP1': "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1",
+        'SelfRegulationSCP2': "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2",
+        'SpokenArabicDigits': "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SpokenArabicDigits/SpokenArabicDigits",
+        'UWaveGestureLibrary': "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/UWaveGestureLibrary/UWaveGestureLibrary",
     }
 
 
-    for dataset_name, files in experiment_files.items():
-        # check file exist
-        assert all([os.path.exists(file) for file in files])
+    # check file exist
+    assert all([os.path.exists(file+'_TEST.ts') for file in experiment_files.values()])
 
     random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
     time = str(datetime.datetime.now())
 
     for seed in random_seeds:
         control_randomness(seed=seed)
-        for dataset_name, files in experiment_files.items():
-            name_ = name + '/' + dataset_names[0] + '/' + dataset_name
+        for dataset_name, filename in experiment_files.items():
+            name_ = name + '/' + task + '/' + dataset_name
 
-            train_loader, val_loader, test_loader = get_data(batch_size=batch_size, dataset_names=dataset_names, all=True,
-                                                                files=files)
+            train_loader, val_loader, test_loader = get_data(batch_size=batch_size, task=task, filename=filename)
 
-            try:
-                model = experiment(train_loader, val_loader, test_loader, 
-                                   name=name_, extra=time+'/'+str(seed),
-                                    prefix_tuning_multi=multivariable,
-                                    MPT=multitask,
-                                    no_train_forehead=no_train_forehead,
-                                    epochs=epochs,
-                                    multivariate_projection=multivariate_projection,
-                                    save_model=save_model, num_prefix=num_prefix,
-                                    )
-            except Exception as e:
-                print('error', e)
-                continue
+            # try:
+            _ = experiment(train_loader, val_loader, test_loader, model_name,
+                                name=name_, extra=time+'/'+str(seed),
+                                epochs=epochs,
+                                multivariate_projection=multivariate_projection,
+                                save_model=save_model, num_prefix=num_prefix,
+                                )
+            # except Exception as e:
+            #     print('error', e)
+            #     continue
 
 
 
 
 
-def informer_experiments(dataset_names, experiment_name, multivariate_projection='attention', epochs=20,
-                         save_model=False, bootstrap=False, num_prefix=16):
+def long_forecast_experiments(experiment_name: str,
+                              model_name: str,
+                              multivariate_projection: str,
+                              epochs: int = 10,
+                              save_model: bool = False,
+                              bootstrap: bool = False,
+                              num_prefix: int = 16):
 
     from data import get_data
-    from experiments import zero_shot, finetune, prompt_tuning, lora, linearprobe
+    from experiments import finetune, prompt_tuning, lora, linearprobe
 
 
-    multitask = False
-    multivariable = True
-    no_train_forehead = False
-
+    task = 'forecasting_long'
     batch_size = 1
 
     name = ''
-    if 'zero_shot' in experiment_name:
-        experiment = zero_shot
-    elif 'finetune_prompt' in experiment_name:
+    if 'finetune_prompt' in experiment_name:
         experiment = prompt_tuning
         name = experiment_name
     elif 'finetune' in experiment_name:
@@ -247,197 +215,108 @@ def informer_experiments(dataset_names, experiment_name, multivariate_projection
 
 
     experiment_files = {
-        # 'ETTm2': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv", ), [96]),
-        # 'ETTm1': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv", ), [96]),
-        'exchange_rate': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", ), [96]),
-        'national_illness': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/national_illness.csv", ),
+        # 'ETTm2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv", [96]),
+        # 'ETTm1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv", [96]),
+        'exchange_rate': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", [96]),
+        'national_illness': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/national_illness.csv",
                             #  [24, 60]),  # TODO: need forecast horizon 24 or 60
                              [60]),
-        'ETTh1': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv", ), [96]),
-        'ETTh2': (("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", ), [96]),
+        'ETTh1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv", [96]),
+        'ETTh2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", [96]),
     }
-
-    for dataset_name, (files, horizons) in experiment_files.items():
-        # check file exist
-        assert all([os.path.exists(file) for file in files])
-
+    # check file exist
+    assert all([os.path.exists(file) for file in experiment_files.values()])
 
     random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
     time = str(datetime.datetime.now())
     print('time', time)
 
 
-    mask_ratios = [0.125, 0.25, 0.3, 0.375, 0.5]
-    if dataset_names[0] != 'imputation':
-        mask_ratios = [0.3]
-
-
-
-    for dataset_name, (files, horizons) in experiment_files.items():
+    for dataset_name, (filename, horizons) in experiment_files.items():
 
         for seed in random_seeds:
             control_randomness(seed=seed)
 
-            if dataset_names[0] != 'forecasting_long':
-                # no need to run more than once
-                horizons = [horizons[0]]
+            for horizon in horizons:
+                name_ = name + '/' + task + '/' + dataset_name + '/' + str(horizon)
 
-            for mask_ratio in mask_ratios:
+                train_loader, val_loader, test_loader = get_data(batch_size=batch_size, task=task,
+                                                                    filename=filename, forecast_horizon=horizon,)
 
-                for horizon in horizons:
-                    name_ = name + '/' + dataset_names[0] + '/' + dataset_name
-                    if dataset_names[0] == 'forecasting_long':
-                        name_ += '/' + str(horizon)
-                    if dataset_names[0] == 'imputation':
-                        name_ += '/' + str(mask_ratio)
-
-                    train_loader, val_loader, test_loader = get_data(batch_size=batch_size, dataset_names=dataset_names, all=True,
-                                                                    files=files, forecast_horizon=horizon)
-                    # TODO: why do I need to reset the dataset? isn't it already new?
-                    train_loader.dataset.reset()
-                    val_loader.dataset.reset()
-                    test_loader.dataset.reset()
-
-                    try:
-                        model = experiment(train_loader, val_loader, test_loader,
+                try:
+                    _ = experiment(train_loader, val_loader, test_loader, model_name,
+                                        multivariate_projection=multivariate_projection,
                                         name=name_, extra=time+'/'+str(seed),
-                                            prefix_tuning_multi=multivariable,
-                                            MPT=multitask,
-                                            no_train_forehead=no_train_forehead,
-                                            epochs=epochs,
-                                            multivariate_projection=multivariate_projection,
-                                            save_model=save_model, forecast_horizon=horizon,
-                                            mask_ratio=mask_ratio, num_prefix=num_prefix,
-                                            )
-                    except Exception as e:
-                        print('error', e)
-                        continue
-
-
-def long_forecast_experiments(experiment_name, multivariate_projection='attention', epochs=20, save_model=False, bootstrap=False, num_prefix=16):
-
-    dataset_names = ['forecasting_long']
-
-    informer_experiments(dataset_names, experiment_name, multivariate_projection=multivariate_projection, epochs=epochs,
-                         save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
+                                        epochs=epochs,
+                                        save_model=save_model, forecast_horizon=horizon,
+                                        num_prefix=num_prefix,
+                                        )
+                except Exception as e:
+                    print('error', e)
+                    continue
 
 
 
 
-def imputation_experiments(experiment_name, multivariate_projection='attention', epochs=20, save_model=False, bootstrap=False):
+def mimic_experiments(experiment_name: str,
+                         model_name: str,
+                         benchmark: str,
+                         multivariate_projection: str = 'attention',
+                         epochs: int = 10,
+                         save_model: bool = False,
+                         bootstrap: bool = False,
+                         num_prefix: int = 16):
 
-    dataset_names = ['imputation']
+    from data import load_mimic
+    from experiments import finetune, prompt_tuning, lora, linearprobe
 
-    informer_experiments(dataset_names, experiment_name, multivariate_projection=multivariate_projection, epochs=epochs,
-                         save_model=save_model, bootstrap=bootstrap)
-
-
-
-
-
-def multitask_experiments(experiment_name, epochs=20, save_model=False):
-    from data import get_data
-    from experiments import zero_shot, finetune, prompt_tuning, lora
-
-
-    multitask = True
-    multivariable = False
-    no_train_forehead = False
-
-
-
-    batch_size = 16
+    batch_size = 1
+    task = 'classify'
+    equal_length = False
+    small_part = True
+    ordinal = True
 
     name = ''
-    if 'zero_shot' in experiment_name:
-        experiment = zero_shot
+    if 'finetune_prompt' in experiment_name:
+        experiment = prompt_tuning
+        name = experiment_name
     elif 'finetune' in experiment_name:
         experiment = finetune
         name = experiment_name
     elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name
+        name = experiment_name + '_'+multivariate_projection
     elif 'lora' in experiment_name:
         experiment = lora
+        name = experiment_name
+    elif 'linearprobe' in experiment_name:
+        experiment = linearprobe
         name = experiment_name
     else:
         raise NotImplementedError
 
 
-    experiment_files = {}
-
-    # TODO: use fred data? /zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/fred
-    experiment_files['forecasting_short'] = (
-                                        '/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/monash/m4_yearly_dataset.tsf',
-                                        #   TODO: too much data already, also forecast horizon don't match
-                                        #   '/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/monash/m4_quarterly_dataset.tsf',
-                                        #   '/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/monash/m4_monthly_dataset.tsf',
-                                        #   '/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/monash/m3_yearly_dataset.tsf',
-                                        #   '/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/monash/m3_quarterly_dataset.tsf',
-                                        #   '/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/monash/m3_monthly_dataset.tsf',
-                                          )
-
-    experiment_files['imputation'] = ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv",
-                                      "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv",
-                                      "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv",
-                                      "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv",
-                                      "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", )
-
-    experiment_files['forecasting_long'] = ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv",
-                                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv",
-                                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv",
-                                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv",
-                                            "/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", )
-
-    experiment_files['classify'] = (
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/AtrialFibrillation/AtrialFibrillation_TRAIN.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Epilepsy/Epilepsy_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Epilepsy/Epilepsy_TRAIN.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/ERing/ERing_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/ERing/ERing_TRAIN.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Cricket/Cricket_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Cricket/Cricket_TRAIN.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP1/SelfRegulationSCP1_TRAIN.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/SelfRegulationSCP2/SelfRegulationSCP2_TRAIN.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TEST.ts",
-        "/zfsauton/project/public/Mononito/TimeseriesDatasets/classification/UCR/Heartbeat/Heartbeat_TRAIN.ts")
+    train_loader, val_loader, test_loader = load_mimic(equal_length=equal_length, small_part=small_part,
+                                                       benchmark=benchmark, ordinal=ordinal)
 
 
-    experiment_files['anomaly'] = (
-                                   '/zfsauton/project/public/Mononito/TimeseriesDatasets/anomaly_detection/TSB-UAD-Public/MITDB',
-                                #    '/zfsauton/project/public/Mononito/TimeseriesDatasets/anomaly_detection/TSB-UAD-Public/ECG'  # TOO big
-                                # '/zfsauton/project/public/Mononito/TimeseriesDatasets/anomaly_detection/TSB-UAD-Public/SVDB',
-                                   )
+    random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
+    time = str(datetime.datetime.now())
 
-    dataset_names = experiment_files.keys()
+    name_ = name + '/mimic/' + benchmark
+    for seed in random_seeds:
+        control_randomness(seed=seed)
 
-    for dataset_name, files in experiment_files.items():
-        # check file exist
-        assert all([os.path.exists(file) for file in files])
-
-
-    train_loader, val_loader, test_loader = get_data(batch_size=batch_size, dataset_names=dataset_names, all=True,
-                                                        files=experiment_files)
-
-    model = experiment(train_loader, val_loader, test_loader, 'MPT_'+name,
-                    prefix_tuning_multi=multivariable,
-                    MPT=multitask,
-                    no_train_forehead=no_train_forehead,
-                    epochs=epochs,
-                    save_model=save_model
-                    )
-
-
-
-
-
-
-
-
-
+        # try:
+        _ = experiment(train_loader, val_loader, test_loader, model_name,
+                            name=name_, extra=time+'/'+str(seed),
+                            epochs=epochs,
+                            multivariate_projection=multivariate_projection,
+                            save_model=save_model, num_prefix=num_prefix,
+                            )
+        # except Exception as e:
+        #     print('error', e)
+        #     continue
 
 
 
@@ -447,43 +326,47 @@ def multitask_experiments(experiment_name, epochs=20, save_model=False):
 if __name__ == "__main__":
 
     from data import get_data
-    from experiments import zero_shot, finetune, prompt_tuning
+    from experiments import finetune, prompt_tuning
 
     # torch.autograd.set_detect_anomaly(True)
 
     suffix = ''
     save_model = False
+    bootstrap = False
+    epochs = 10
 
-    # os.environ["WANDB_MODE"] = "offline"
+    os.environ["WANDB_MODE"] = "offline"
 
-    # EXPERIMENT_NAME = 'zero_shot'
+    # model_name = 'moment'
+    model_name = 'gpt4ts'
+
     # EXPERIMENT_NAME = 'prompttune'
     # EXPERIMENT_NAME = 'finetune'
     EXPERIMENT_NAME = 'lora'
     # EXPERIMENT_NAME = 'linearprobe'
     # EXPERIMENT_NAME = 'finetune_prompt'
 
-
     EXPERIMENT_NAME = suffix + EXPERIMENT_NAME
 
-    # multivariate_projection = 'linear'
     # multivariate_projection = 'attention'
     multivariate_projection = 'vanilla'
-    # multivariate_projection = 'residual'
 
     num_prefix = 16
 
-    bootstrap = True
 
-    epochs = 10
-
-    classify_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=epochs,
-                            save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)  # this one probably needs larger gpu
-    # imputation_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=epochs,
-    #                       save_model=save_model, bootstrap=bootstrap)
-    # long_forecast_experiments(EXPERIMENT_NAME, multivariate_projection=multivariate_projection, epochs=epochs,
+    # classify_experiments(EXPERIMENT_NAME, model_name, multivariate_projection=multivariate_projection, epochs=epochs,
+    #                         save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)  # this one probably needs larger gpu
+    # long_forecast_experiments(EXPERIMENT_NAME, model_name, multivariate_projection=multivariate_projection, epochs=epochs,
     #                           save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
-    # multitask_experiments(EXPERIMENT_NAME, epochs=epochs, save_model=save_model)
+
+
+    benchmark = 'mortality'
+    # benchmark = 'phenotyping'
+    mimic_experiments(EXPERIMENT_NAME, model_name, benchmark, multivariate_projection=multivariate_projection, epochs=epochs,
+                        save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
+
+
+
 
 
     # TODO: balance weights for classification

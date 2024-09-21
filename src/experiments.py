@@ -6,83 +6,65 @@ import torch
 import wandb
 
 from momentfm import MOMENTPipeline
-# from momentfm.models.moment_original import MOMENTPipeline
-from momentfm.utils.masking import Masking
-
-
 
 from main import DEVICE
 from train import train, inference
+from ts_datasets import InformerDataset, ClassificationDataset
 
-
-def zero_shot(train_loader, val_loader, test_loader, name='', extra='', **kwargs):
-    """
-    zero shot
-    TODO: cannot do this with forecasting, because head not pretrained
-    """
-
-    # imputation model
-    model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        # For imputation, we will load MOMENT in `reconstruction` mode
-        model_kwargs={
-            'task_name': 'reconstruction',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizons': (96, 8),
-            # 'prefix_tuning': False,
-            # 'prefix_tuning_multi': False,
-            # 'MPT': True,
-            'num_prefix': 2,
-            'task_names': list(next(iter(train_loader)).keys()),
-            }
-    ).to(DEVICE)
-    model.init()
-
-    # need to freeze head manually
-    for param in model.parameters():
-        param.requires_grad = False
-
-    # print frozen params
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(name)
-
-    train_bs = 0
-    for data in train_loader:
-        train_bs += 1
-    train_loader.bs = train_bs
-
-    test_bs = 0
-    for data in test_loader:
-        test_bs += 1
-    test_loader.bs = test_bs
+import sys
+sys.path.append('/zfsauton2/home/mingzhul/time-series-prompt/moment-research')
+from moment.utils.config import Config
+from moment.utils.utils import control_randomness, parse_config
+from moment.models.gpt4ts_prompt import GPT4TS_prompt
+from moment.models.gpt4ts import GPT4TS
 
 
 
-    model = inference(model, test_loader,
-                      torch.nn.MSELoss(reduction='none').to(DEVICE),
-                      'zero-shot',
-                      Masking(mask_ratio=0.3),
-                      train_loader,
-                      'test',
-                      log=False)
 
-    return model
+def load_gpt4ts(n_channels: int, num_classes: int,
+                train_loader: torch.utils.data.DataLoader,
+                num_prefix: int = None, multivariate_projection: str = None):
+        config_path = "/zfsauton2/home/mingzhul/time-series-prompt/moment-research/configs/prompt/gpt4ts_classification.yaml"
+        gpu_id = 0
+        random_seed = 0
+
+        config = Config(
+            config_file_path=config_path, default_config_file_path="/zfsauton2/home/mingzhul/time-series-prompt/moment-research/configs/default.yaml"
+        ).parse()
+
+        config["device"] = gpu_id if torch.cuda.is_available() else "cpu"
+        args = parse_config(config)
+        args.shuffle = False
+
+        if multivariate_projection is not None:
+            args.model_name = "GPT4TS_prompt"
+            model = GPT4TS_prompt
+        else:
+            args.model_name = "GPT4TS"
+            model = GPT4TS
+
+        args.n_channels = n_channels
+        args.num_prefix = num_prefix
+        args.num_class = num_classes
+        args.seq_len = train_loader.dataset.seq_len
+        args.multivariate_projection = multivariate_projection
+
+        model = model(configs=args)
+
+        return model
 
 
 
-def prompt_tuning(train_loader, val_loader, test_loader, 
-                  num_prefix=16, name='', extra='',
-                  prefix_tuning_multi=False,
-                  MPT=False,
-                  no_train_forehead=False,
-                  epochs=400,
-                  multivariate_projection='attention',
-                  save_model=False,
-                  forecast_horizon=96,
-                  mask_ratio=0.3,):
+def prompt_tuning(train_loader: torch.utils.data.DataLoader,
+                  val_loader: torch.utils.data.DataLoader,
+                  test_loader: torch.utils.data.DataLoader,
+                  model_name: str,
+                  multivariate_projection: str,
+                  num_prefix: int = 16,
+                  name: str = '', extra: str = '',
+                  epochs: int = 10,
+                  save_model: bool = False,
+                  forecast_horizon: int = 96,):
     """
     prompt tuning
     """
@@ -92,52 +74,41 @@ def prompt_tuning(train_loader, val_loader, test_loader,
         name=name,
     )
 
-    n_channels = 1
-    num_classes = 1
-    if 'forecasting_long' in train_loader.dataset.datasets:
-        n_channels = next(iter(train_loader.dataset.datasets['forecasting_long']))[0].shape[0]
-        
-    elif 'classify' in train_loader.dataset.datasets:
-        next(iter(train_loader))
-        n_channels = train_loader.dataset.datasets['classify'].n_channels # TODO: this is not elegant
-        num_classes = train_loader.dataset.datasets['classify'].num_classes
-    else:
-        raise ValueError('Dataset not supported')
+    task_name = 'classify' if isinstance(train_loader.dataset, ClassificationDataset) else 'forecasting_long'
 
-    # imputation model
-    model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        # output_loading_info=True,
-        # For imputation, we will load MOMENT in `reconstruction` mode
-        model_kwargs={
-            'task_name': 'reconstruction',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizons': (forecast_horizon, 8),
-            # 'prefix_tuning': True,
-            'prefix_tuning_multi': prefix_tuning_multi,
-            'MPT': MPT,
-            'num_prefix': num_prefix,
-            'task_names': list(next(iter(train_loader)).keys()),
-            'multivariate_projection': multivariate_projection,
-            'n_channels': n_channels,
-            'num_class': num_classes,
-            }
-    )
-    model.init()
-    
-    # print(name)
+    num_classes = 1
+    n_channels = train_loader.dataset.n_channels
+    if task_name == 'classify':
+        num_classes = train_loader.dataset.num_classes
+
+
+    if model_name == 'moment':
+        # imputation model
+        model = MOMENTPipeline.from_pretrained(
+            "AutonLab/MOMENT-1-large",
+            model_kwargs={
+                'task_name': task_name,
+                'freeze_encoder': False, # Freeze the patch embedding layer
+                'freeze_embedder': False, # Freeze the transformer encoder
+                'freeze_head': False, # The linear forecasting head must be trained
+                'prefix_tuning_multi': True,
+                'forecast_horizon': forecast_horizon,
+                'num_prefix': num_prefix,
+                'multivariate_projection': multivariate_projection,
+                'n_channels': n_channels,
+                'num_class': num_classes,
+                }
+        )
+        model.init()
+
+    elif model_name == 'gpt4ts':
+        model = load_gpt4ts(n_channels, num_classes, train_loader, num_prefix, multivariate_projection)
 
     if 'finetune' not in name:
         # need to freeze head manually
         for n, param in model.named_parameters():
-            if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
+            if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
                 param.requires_grad = False
-
-    if no_train_forehead:
-        for param in model.fore_head.parameters():
-            param.requires_grad = False
 
     # print frozen params
     for n, param in model.named_parameters():
@@ -147,7 +118,7 @@ def prompt_tuning(train_loader, val_loader, test_loader,
     print('number of parameters', sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     model = train(model, train_loader, val_loader, test_loader, max_epoch=epochs, identifier=name,
-                  extra=extra, mask_ratio=mask_ratio)
+                  extra=extra)
 
     if save_model:
         try:
@@ -163,11 +134,15 @@ def prompt_tuning(train_loader, val_loader, test_loader,
 
 
 
-def finetune(train_loader, val_loader, test_loader, name='', extra='',
-             epochs=400, save_model=False,
-             lora=False, linearprobe=False,
-             forecast_horizon=96,
-             mask_ratio=0.3,
+def finetune(train_loader: torch.utils.data.DataLoader,
+             val_loader: torch.utils.data.DataLoader,
+             test_loader: torch.utils.data.DataLoader,
+             model_name: str,
+             lora: bool = False, linearprobe: bool = False,
+             name: str = '', extra: str = '',
+             epochs: int = 10,
+             save_model: bool = False,
+             forecast_horizon: int = 96,
              **kwargs):
     """
     finetune
@@ -177,62 +152,68 @@ def finetune(train_loader, val_loader, test_loader, name='', extra='',
         name=name,
     )
 
-    n_channels = 1
+    task_name = 'classify' if isinstance(train_loader.dataset, ClassificationDataset) else 'forecasting_long'
+
     num_classes = 1
-    if 'classify' in train_loader.dataset.datasets:
-        next(iter(train_loader))
-        n_channels = train_loader.dataset.datasets['classify'].n_channels # TODO: this is not elegant
-        num_classes = train_loader.dataset.datasets['classify'].num_classes
+    n_channels = train_loader.dataset.n_channels
+    if task_name == 'classify':
+        num_classes = train_loader.dataset.num_classes
 
-    # imputation model
-    model = MOMENTPipeline.from_pretrained(
-        "AutonLab/MOMENT-1-large",
-        # For imputation, we will load MOMENT in `reconstruction` mode
-        model_kwargs={
-            'task_name': 'reconstruction',
-            # 'task_name': 'forecasting',
-            'freeze_encoder': False, # Freeze the patch embedding layer
-            'freeze_embedder': False, # Freeze the transformer encoder
-            'freeze_head': False, # The linear forecasting head must be trained
-            'forecast_horizons': (forecast_horizon, 8),
-            # 'forecast_horizon': 96,
-            # 'prefix_tuning': False,
-            # 'prefix_tuning_multi': False,
-            # 'MPT': True,
-            'num_prefix': 16,
-            'task_names': list(next(iter(train_loader)).keys()),
-            'n_channels': n_channels,
-            'num_class': num_classes,
-            }
-    )
-
-    model.init()
-
-    for param in model.parameters():
-        param.requires_grad = True
-
-    # # linear probe
-    # for n, param in model.named_parameters():
-    #     if 'prefix' not in n and 'prompt' not in n and 'head' not in n and 'mpt' not in n and 'value_embedding' not in n and 'layer_norm' not in n:
-    #         param.requires_grad = False
-
-    if lora:
-        from peft import LoraConfig, get_peft_model
-
-        config = LoraConfig(
-            r=4,
-            lora_alpha=16,
-            target_modules=["q", "v"], # https://github.com/huggingface/peft/blob/39ef2546d5d9b8f5f8a7016ec10657887a867041/src/peft/utils/other.py#L220
-            lora_dropout=0.1,
-            # bias="none",
-            modules_to_save=["value_embedding", "layer_norm", "fore_head_long", "classification_head"],
+    if model_name == 'moment':
+        model = MOMENTPipeline.from_pretrained(
+            "AutonLab/MOMENT-1-large",
+            model_kwargs={
+                'task_name': task_name,
+                'freeze_encoder': False, # Freeze the patch embedding layer
+                'freeze_embedder': False, # Freeze the transformer encoder
+                'freeze_head': False, # The linear forecasting head must be trained
+                'forecast_horizon': forecast_horizon,
+                'num_prefix': 16,
+                'n_channels': n_channels,
+                'num_class': num_classes,
+                }
         )
-        model = get_peft_model(model, config)
-    
-    if linearprobe:
-        for n, param in model.named_parameters():
-            if 'head' not in n:
-                param.requires_grad = False
+        model.init()
+
+        for param in model.parameters():
+            param.requires_grad = True
+
+        if lora:
+            from peft import LoraConfig, get_peft_model
+            config = LoraConfig(
+                r=4,
+                lora_alpha=16,
+                target_modules=["q", "v"], # https://github.com/huggingface/peft/blob/39ef2546d5d9b8f5f8a7016ec10657887a867041/src/peft/utils/other.py#L220
+                lora_dropout=0.1,
+                # bias="none",
+                modules_to_save=["value_embedding", "layer_norm", "head"],
+            )
+            model = get_peft_model(model, config)
+
+        if linearprobe:
+            for n, param in model.named_parameters():
+                if 'head' not in n:
+                    param.requires_grad = False
+
+    elif model_name == 'gpt4ts':
+        model = load_gpt4ts(n_channels, num_classes, train_loader)
+
+        if lora:
+            from peft import LoraConfig, get_peft_model
+
+            config = LoraConfig(
+                r=1,
+                lora_alpha=16,
+                lora_dropout=0.1,
+                # bias="none",
+                modules_to_save=["wpe", "enc_embedding", "ln", "predict_linear", "out_layer"],
+            )
+            model.gpt2 = get_peft_model(model.gpt2, config)
+
+        if linearprobe:
+            for n, param in model.named_parameters():
+                if 'predict_linear' not in n and 'out_layer' not in n and "enc_embedding" not in n:
+                    param.requires_grad = False
 
 
     # print frozen params
@@ -243,7 +224,7 @@ def finetune(train_loader, val_loader, test_loader, name='', extra='',
     print('number of parameters', sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     model = train(model, train_loader, val_loader, test_loader, max_epoch=epochs, identifier=name,
-                  extra=extra, mask_ratio=mask_ratio)
+                  extra=extra)
 
     if save_model:
         try:
@@ -259,21 +240,33 @@ def finetune(train_loader, val_loader, test_loader, name='', extra='',
 
 
 
-def lora(train_loader, val_loader, test_loader, name='', extra='', epochs=400, save_model=False, forecast_horizon=96,
+def lora(train_loader: torch.utils.data.DataLoader,
+             val_loader: torch.utils.data.DataLoader,
+             test_loader: torch.utils.data.DataLoader,
+             model_name: str,
+             name: str = '', extra: str = '',
+             epochs: int = 10, save_model: bool = False,
+             forecast_horizon: int = 96,
              **kwargs):
 
-
-    return finetune(train_loader, val_loader, test_loader, name=name, extra=extra,
+    return finetune(train_loader, val_loader, test_loader, model_name,
+                    name=name, extra=extra,
                     epochs=epochs, save_model=save_model, lora=True, linearprobe=False,
                     forecast_horizon=forecast_horizon, **kwargs)
 
 
 
-def linearprobe(train_loader, val_loader, test_loader, name='', extra='', epochs=400, save_model=False, forecast_horizon=96,
-             **kwargs):
+def linearprobe(train_loader: torch.utils.data.DataLoader,
+                val_loader: torch.utils.data.DataLoader,
+                test_loader: torch.utils.data.DataLoader,
+                model_name: str,
+                name: str = '', extra: str = '',
+                epochs: int = 10, save_model: bool = False,
+                forecast_horizon: int = 96,
+                **kwargs):
 
-
-    return finetune(train_loader, val_loader, test_loader, name=name, extra=extra,
+    return finetune(train_loader, val_loader, test_loader, model_name,
+                    name=name, extra=extra,
                     epochs=epochs, save_model=save_model, lora=False, linearprobe=True,
                     forecast_horizon=forecast_horizon, **kwargs)
 
