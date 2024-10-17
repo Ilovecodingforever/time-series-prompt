@@ -125,7 +125,7 @@ def load_model(num_classes, n_channels, model_name, mode='finetune', equal_lengt
                 target_modules=["q", "v"], # https://github.com/huggingface/peft/blob/39ef2546d5d9b8f5f8a7016ec10657887a867041/src/peft/utils/other.py#L220
                 lora_dropout=0.1,
                 # bias="none",
-                modules_to_save=["value_embedding", "layer_norm", "head"],
+                modules_to_save=["value_embedding", "layer_norm", "fore_head_long", "classification_head"],
             )
             model = get_peft_model(model, config)
 
@@ -532,16 +532,16 @@ if __name__ == "__main__":
     ordinal = True
 
     # mode = 'finetune'
-    # mode = 'prompt'
+    mode = 'prompt'
     # mode = 'lora'
-    mode = 'linear_probe'
+    # mode = 'linear_probe'
     # mode = 'finetune_prompt'
 
     benchmark = 'mortality'
     # benchmark = 'phenotyping'
 
-    # model_name = 'moment'
-    model_name = 'gpt4ts'
+    model_name = 'moment'
+    # model_name = 'gpt4ts'
 
     multivariate_projection = 'attention'
     # multivariate_projection = 'vanilla'

@@ -17,18 +17,19 @@ from momentfm.utils.data import load_from_tsfile
 
 from ts_datasets import InformerDataset, ClassificationDataset
 
+from typing import Optional
 
 
 
 
 def get_data(batch_size: int, task: str,
-             filename: str = None,
-             forecast_horizon: int = None,):
+             filename: str,
+             forecast_horizon: int = 96,):
     """
     get data
     """
 
-    if task == 'classify':
+    if task == 'classification':
         train_dataset = ClassificationDataset(batch_size=batch_size,
                                               data_split='train', filename=filename)
 
@@ -38,7 +39,7 @@ def get_data(batch_size: int, task: str,
         test_dataset = ClassificationDataset(batch_size=batch_size,
                                              data_split='test', filename=filename)
 
-    elif task == 'forecasting_long':
+    elif task == 'forecasting':
         train_dataset = InformerDataset(batch_size=batch_size, data_split='train',
                                         forecast_horizon=forecast_horizon,
                                         data_stride_len=1, filename=filename)
@@ -63,39 +64,22 @@ def get_data(batch_size: int, task: str,
 
 
 
-def load_mimic(equal_length=False, small_part=True, benchmark='mortality', ordinal=False):
+def load_mimic(equal_length=False, small_part=True, benchmark='mortality', ordinal=False, seed=0, batch_size=4, normalize=True):
     from ts_datasets import MIMIC_mortality  # TODO: this changes visible devices, why?
     from ts_datasets import MIMIC_phenotyping
 
-    # batch_size = 1
-    # batch_size = 16
-    batch_size = 4
     shuffle = True
 
 
     if benchmark == 'mortality':
-        train_data = MIMIC_mortality(data_split="train", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
-        val_data = MIMIC_mortality(data_split="val", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
-        test_data = MIMIC_mortality(data_split="test", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
-
-        # if ordinal:
-        #     n_channels = 18
-        # else:
-        #     n_channels = 60
-
-        # n_classes = 1
+        train_data = MIMIC_mortality(data_split="train", equal_length=equal_length, small_part=small_part, ordinal=ordinal, seed=seed, normalize=normalize)
+        val_data = MIMIC_mortality(data_split="val", equal_length=equal_length, small_part=small_part, ordinal=ordinal, seed=seed, normalize=normalize)
+        test_data = MIMIC_mortality(data_split="test", equal_length=equal_length, small_part=small_part, ordinal=ordinal, seed=seed, normalize=normalize)
 
     elif benchmark == 'phenotyping':
-        train_data = MIMIC_phenotyping(data_split="train", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
-        val_data = MIMIC_phenotyping(data_split="val", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
-        test_data = MIMIC_phenotyping(data_split="test", equal_length=equal_length, small_part=small_part, ordinal=ordinal)
-
-        # if ordinal:
-        #     n_channels = 18
-        # else:
-        #     n_channels = 60
-
-        # n_classes = 25
+        train_data = MIMIC_phenotyping(data_split="train", equal_length=equal_length, small_part=small_part, ordinal=ordinal, seed=seed, normalize=normalize)
+        val_data = MIMIC_phenotyping(data_split="val", equal_length=equal_length, small_part=small_part, ordinal=ordinal, seed=seed, normalize=normalize)
+        test_data = MIMIC_phenotyping(data_split="test", equal_length=equal_length, small_part=small_part, ordinal=ordinal, seed=seed, normalize=normalize)
 
     else:
         raise ValueError('benchmark not supported')

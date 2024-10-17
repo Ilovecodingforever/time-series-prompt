@@ -76,12 +76,13 @@ import os
 import torch
 import datetime
 
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
+os.environ["WANDB_CACHE_DIR"] = "/home/scratch/mingzhul/.cache/wandb"
+
 from momentfm.utils.utils import control_randomness
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-os.environ["HF_HOME"] = "/home/scratch/mingzhul/.cache/huggingface"
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RANDOM_SEED = 13
 
 
@@ -94,36 +95,38 @@ control_randomness(seed=RANDOM_SEED)
 
 def classify_experiments(experiment_name: str,
                          model_name: str,
-                         multivariate_projection: str = 'attention',
+                         multivariate_projection: str,
+                         agg: str,
                          epochs: int = 10,
                          save_model: bool = False,
                          bootstrap: bool = False,
-                         num_prefix: int = 16):
+                         num_prefix: int = 16,
+                         flatten: bool = False):
 
     from data import get_data
     from experiments import finetune, prompt_tuning, lora, linearprobe
 
 
-    task = 'classify'
+    task = 'classification'
 
     batch_size = 1
 
-    name = ''
+    name = model_name + '/'
     if 'finetune_prompt' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name
+        name += experiment_name
     elif 'finetune' in experiment_name:
         experiment = finetune
-        name = experiment_name
+        name += experiment_name
     elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name + '_'+multivariate_projection
+        name += experiment_name + '_'+multivariate_projection+'_'+agg
     elif 'lora' in experiment_name:
         experiment = lora
-        name = experiment_name
+        name += experiment_name
     elif 'linearprobe' in experiment_name:
         experiment = linearprobe
-        name = experiment_name
+        name += experiment_name
     else:
         raise NotImplementedError
 
@@ -157,20 +160,23 @@ def classify_experiments(experiment_name: str,
     random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
     time = str(datetime.datetime.now())
 
-    for seed in random_seeds:
-        control_randomness(seed=seed)
-        for dataset_name, filename in experiment_files.items():
+    for dataset_name, filename in experiment_files.items():
+        for seed in random_seeds:
+            control_randomness(seed=seed)
             name_ = name + '/' + task + '/' + dataset_name
 
             train_loader, val_loader, test_loader = get_data(batch_size=batch_size, task=task, filename=filename)
 
             # try:
-            _ = experiment(train_loader, val_loader, test_loader, model_name,
-                                name=name_, extra=time+'/'+str(seed),
-                                epochs=epochs,
-                                multivariate_projection=multivariate_projection,
-                                save_model=save_model, num_prefix=num_prefix,
-                                )
+            _ = experiment(train_loader, val_loader, test_loader,
+                           model_name, task,
+                            name=name_, extra=time+'/'+str(seed),
+                            epochs=epochs,
+                            multivariate_projection=multivariate_projection,
+                            agg=agg,
+                            save_model=save_model, num_prefix=num_prefix,
+                            flatten=flatten,
+                            )
             # except Exception as e:
             #     print('error', e)
             #     continue
@@ -182,34 +188,36 @@ def classify_experiments(experiment_name: str,
 def long_forecast_experiments(experiment_name: str,
                               model_name: str,
                               multivariate_projection: str,
+                              agg: str,
                               epochs: int = 10,
                               save_model: bool = False,
                               bootstrap: bool = False,
-                              num_prefix: int = 16):
+                              num_prefix: int = 16,
+                              flatten: bool = False):
 
     from data import get_data
     from experiments import finetune, prompt_tuning, lora, linearprobe
 
 
-    task = 'forecasting_long'
+    task = 'forecasting'
     batch_size = 1
 
-    name = ''
+    name = model_name + '/'
     if 'finetune_prompt' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name
+        name += experiment_name
     elif 'finetune' in experiment_name:
         experiment = finetune
-        name = experiment_name
+        name += experiment_name
     elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name + '_'+multivariate_projection
+        name += experiment_name + '_'+multivariate_projection + '_' + agg
     elif 'lora' in experiment_name:
         experiment = lora
-        name = experiment_name
+        name += experiment_name
     elif 'linearprobe' in experiment_name:
         experiment = linearprobe
-        name = experiment_name
+        name += experiment_name
     else:
         raise NotImplementedError
 
@@ -217,15 +225,15 @@ def long_forecast_experiments(experiment_name: str,
     experiment_files = {
         # 'ETTm2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm2.csv", [96]),
         # 'ETTm1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTm1.csv", [96]),
-        'exchange_rate': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", [96]),
         'national_illness': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/national_illness.csv",
                             #  [24, 60]),  # TODO: need forecast horizon 24 or 60
                              [60]),
-        'ETTh1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv", [96]),
-        'ETTh2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", [96]),
+        # 'ETTh1': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh1.csv", [96]),
+        # 'ETTh2': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/ETTh2.csv", [96]),
+        # 'exchange_rate': ("/zfsauton/project/public/Mononito/TimeseriesDatasets/forecasting/autoformer/exchange_rate.csv", [96]),
     }
     # check file exist
-    assert all([os.path.exists(file) for file in experiment_files.values()])
+    assert all([os.path.exists(file) for file, _ in experiment_files.values()])
 
     random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
     time = str(datetime.datetime.now())
@@ -233,27 +241,27 @@ def long_forecast_experiments(experiment_name: str,
 
 
     for dataset_name, (filename, horizons) in experiment_files.items():
+        for horizon in horizons:
+            for seed in random_seeds:
 
-        for seed in random_seeds:
-            control_randomness(seed=seed)
-
-            for horizon in horizons:
                 name_ = name + '/' + task + '/' + dataset_name + '/' + str(horizon)
+                control_randomness(seed=seed)
 
                 train_loader, val_loader, test_loader = get_data(batch_size=batch_size, task=task,
                                                                     filename=filename, forecast_horizon=horizon,)
 
-                try:
-                    _ = experiment(train_loader, val_loader, test_loader, model_name,
-                                        multivariate_projection=multivariate_projection,
-                                        name=name_, extra=time+'/'+str(seed),
-                                        epochs=epochs,
-                                        save_model=save_model, forecast_horizon=horizon,
-                                        num_prefix=num_prefix,
-                                        )
-                except Exception as e:
-                    print('error', e)
-                    continue
+                # try:
+                _ = experiment(train_loader, val_loader, test_loader, model_name, task,
+                                multivariate_projection=multivariate_projection,
+                                agg=agg,
+                                name=name_, extra=time+'/'+str(seed),
+                                epochs=epochs,
+                                save_model=save_model, forecast_horizon=horizon,
+                                num_prefix=num_prefix, flatten=flatten,
+                                )
+                # except Exception as e:
+                #     print('error', e)
+                #     continue
 
 
 
@@ -261,43 +269,42 @@ def long_forecast_experiments(experiment_name: str,
 def mimic_experiments(experiment_name: str,
                          model_name: str,
                          benchmark: str,
-                         multivariate_projection: str = 'attention',
+                         multivariate_projection: str,
+                         agg: str,
                          epochs: int = 10,
                          save_model: bool = False,
                          bootstrap: bool = False,
-                         num_prefix: int = 16):
+                         num_prefix: int = 16,
+                         flatten: bool = False):
 
     from data import load_mimic
     from experiments import finetune, prompt_tuning, lora, linearprobe
 
     batch_size = 1
-    task = 'classify'
+    task = 'classification'
     equal_length = False
     small_part = True
     ordinal = True
 
-    name = ''
+    name = model_name + '/'
     if 'finetune_prompt' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name
+        name += experiment_name
     elif 'finetune' in experiment_name:
         experiment = finetune
-        name = experiment_name
+        name += experiment_name
     elif 'prompttune' in experiment_name:
         experiment = prompt_tuning
-        name = experiment_name + '_'+multivariate_projection
+        name += experiment_name + '_'+multivariate_projection + '_' + agg
     elif 'lora' in experiment_name:
         experiment = lora
-        name = experiment_name
+        name += experiment_name
     elif 'linearprobe' in experiment_name:
         experiment = linearprobe
-        name = experiment_name
+        name += experiment_name
     else:
         raise NotImplementedError
 
-
-    train_loader, val_loader, test_loader = load_mimic(equal_length=equal_length, small_part=small_part,
-                                                       benchmark=benchmark, ordinal=ordinal)
 
 
     random_seeds = [0, 1, 2, 3, 4] if bootstrap else [13]
@@ -305,18 +312,57 @@ def mimic_experiments(experiment_name: str,
 
     name_ = name + '/mimic/' + benchmark
     for seed in random_seeds:
+    
         control_randomness(seed=seed)
 
+        train_loader, val_loader, test_loader = load_mimic(equal_length=equal_length, small_part=small_part,
+                                                        benchmark=benchmark, ordinal=ordinal, seed=seed, batch_size=batch_size)
+
         # try:
-        _ = experiment(train_loader, val_loader, test_loader, model_name,
-                            name=name_, extra=time+'/'+str(seed),
-                            epochs=epochs,
-                            multivariate_projection=multivariate_projection,
-                            save_model=save_model, num_prefix=num_prefix,
-                            )
+        _ = experiment(train_loader, val_loader, test_loader, model_name, task,
+                        name=name_, extra=time+'/'+str(seed),
+                        epochs=epochs,
+                        multivariate_projection=multivariate_projection,
+                        agg=agg,
+                        save_model=save_model, num_prefix=num_prefix,
+                        flatten=flatten,
+                        )
+        
+        
         # except Exception as e:
         #     print('error', e)
         #     continue
+
+
+
+
+
+
+def run_baselines(experiment_name: str,
+                    model_name: str,
+                    benchmark: str,
+                    multivariate_projection: str,
+                    agg: str,
+                    epochs: int = 10,
+                    save_model: bool = False,
+                    bootstrap: bool = False,
+                    num_prefix: int = 16,
+                    flatten: bool = False):
+    # Classification:
+        # Logistic regression, MLP
+        # TimesNet (non-transformer, DL)
+    # Forecasting:
+        # PatchTST (transformer)
+        # TimesNet
+        # linear regression
+
+    model_name = 'lr'
+
+
+
+
+    pass
+
 
 
 
@@ -328,48 +374,73 @@ if __name__ == "__main__":
     from data import get_data
     from experiments import finetune, prompt_tuning
 
+
+
     # torch.autograd.set_detect_anomaly(True)
 
-    suffix = ''
+    # create dir if not exist
+    os.makedirs('/home/scratch/mingzhul/moment-research/results/wandb/', exist_ok=True)
+
+    # suffix = ''
+    suffix = 'focal_loss_'
+    # suffix = 'cost_sensitive_loss'
     save_model = False
-    bootstrap = False
+    bootstrap = True
     epochs = 10
 
-    os.environ["WANDB_MODE"] = "offline"
+    # os.environ["WANDB_MODE"] = "offline"
 
-    # model_name = 'moment'
-    model_name = 'gpt4ts'
+    model_name = 'moment'
+    # model_name = 'gpt4ts'
 
-    # EXPERIMENT_NAME = 'prompttune'
+
+    flatten = False
+    categorical_embedding = False
+
+    EXPERIMENT_NAME = 'prompttune'
     # EXPERIMENT_NAME = 'finetune'
-    EXPERIMENT_NAME = 'lora'
+    # EXPERIMENT_NAME = 'lora'
     # EXPERIMENT_NAME = 'linearprobe'
+
     # EXPERIMENT_NAME = 'finetune_prompt'
 
     EXPERIMENT_NAME = suffix + EXPERIMENT_NAME
 
-    # multivariate_projection = 'attention'
-    multivariate_projection = 'vanilla'
+    multivariate_projection = 'attention'
+    # multivariate_projection = 'vanilla'  # p-tuning v2
+    # multivariate_projection = 'vanilla_vanilla' # original prompt tuning
 
-    num_prefix = 16
+    agg = 'mlp'
+    # agg = 'rnn'
+
+    # NOTE: forecasting use 16, classification use 4
+    num_prefix = 4
+    # num_prefix = 32
 
 
-    # classify_experiments(EXPERIMENT_NAME, model_name, multivariate_projection=multivariate_projection, epochs=epochs,
-    #                         save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)  # this one probably needs larger gpu
-    # long_forecast_experiments(EXPERIMENT_NAME, model_name, multivariate_projection=multivariate_projection, epochs=epochs,
-    #                           save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
+    # classify_experiments(EXPERIMENT_NAME, model_name, multivariate_projection=multivariate_projection, agg=agg,
+    #                      epochs=epochs, save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix, flatten=flatten)  # this one probably needs larger gpu
+    # long_forecast_experiments(EXPERIMENT_NAME, model_name, multivariate_projection=multivariate_projection, agg=agg,
+    #                           epochs=epochs, save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix, flatten=flatten)
 
 
     benchmark = 'mortality'
     # benchmark = 'phenotyping'
-    mimic_experiments(EXPERIMENT_NAME, model_name, benchmark, multivariate_projection=multivariate_projection, epochs=epochs,
-                        save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix)
+    mimic_experiments(EXPERIMENT_NAME, model_name, benchmark, multivariate_projection=multivariate_projection, agg=agg,
+                      epochs=epochs, save_model=save_model, bootstrap=bootstrap, num_prefix=num_prefix, flatten=flatten)
 
 
 
+
+
+    # TODO: try inputing ones to the prompt module, should recover vanilla prompt tuning?
+    # TODO: class balance should be same for train val test
 
 
     # TODO: balance weights for classification
+
+    # TODO: should you do revin for categorical data?
+    #   revin does std, so categorical numbers are very big after std, if one batch only has one category
 
 
     # TODO:
@@ -379,29 +450,14 @@ if __name__ == "__main__":
     # finetune + multivariable?
     #  - what's the point? just use new model that can handle multiple variables
 
-
     # TODO: look at notes for details
     # Use date as covariate??? so you can have multiple variables for univariate time series?? to deal with non-constant frequency
     # TODO: does this really help in RNNs?
 
     # why is fintuning perform similarly to moment paper results?
 
-    # TODO: anomaly vus AUC
-
-    # TODO: visualize prompt
-
-    # TODO: debug linear multivariable
-
     # do prompt tuning on other models
     # survival analysis
-
-    # TODO: do parallel processing, research code is a lot faster. maybe because of autocast? changed current code to match research code but haven't run yet
-
-    # TODO: research code end-to-end finetune is with t5-base?
-
-    # TODO: allow different batch size for different tasks
-
-    # TODO: all data similar size
 
     # TODO: compare your multivariable code to itransformer
 
@@ -410,6 +466,4 @@ if __name__ == "__main__":
     # adding increasing number of channels
 
 
-    # done:
-    # what should stride be?
-    # they are all 1 in moment research code
+

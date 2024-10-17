@@ -28,6 +28,7 @@ from mimic3_benchmarks.mimic3benchmark.readers import PhenotypingReader
 from mimic3_benchmarks.mimic3models.preprocessing import Discretizer, Normalizer
 from mimic3_benchmarks.mimic3models.in_hospital_mortality import utils
 
+from typing import Optional
 
 
 # UCR: https://timeseriesclassification.com/dataset.php
@@ -75,8 +76,9 @@ DATASETS_WITHOUT_NORMALIZATION = [
 class ClassificationDataset(torch.utils.data.Dataset):
 
     def __init__(self, batch_size: int,
+                 filename: str,
                  data_split: str = "train",
-                 filename: str = None):
+                 ):
         """
         Parameters
         ----------
@@ -243,11 +245,11 @@ class InformerDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         batch_size: int,
-        forecast_horizon: Optional[int] = 192,
+        filename: str,
+        forecast_horizon: int = 192,
         data_split: str = "train",
         data_stride_len: int = 1,
         task_name: str = "forecasting",
-        filename: str = None
     ):
         """
         Parameters
@@ -342,39 +344,24 @@ class InformerDataset(torch.utils.data.Dataset):
         seq_end = seq_start + self.seq_len
         input_mask = np.ones(self.seq_len)
 
-        if self.task_name == "imputation":
-            if seq_end > self.length_timeseries:
-                seq_end = self.length_timeseries
-                seq_end = seq_end - self.seq_len
+        pred_end = seq_end + self.forecast_horizon
 
-            timeseries = self.data[seq_start:seq_end, :].T
+        if pred_end > self.length_timeseries:
+            pred_end = self.length_timeseries
+            seq_end = seq_end - self.forecast_horizon
+            seq_start = seq_end - self.seq_len
 
-            yield timeseries, input_mask
+        assert(seq_start >=0 and seq_end >= 0 and pred_end >= 0)
+        timeseries = self.data[seq_start:seq_end, :].T
+        forecast = self.data[seq_end:pred_end, :].T
 
-        else:
-            pred_end = seq_end + self.forecast_horizon
-
-            if pred_end > self.length_timeseries:
-                pred_end = self.length_timeseries
-                seq_end = seq_end - self.forecast_horizon
-                seq_start = seq_end - self.seq_len
-
-            assert(seq_start >=0 and seq_end >= 0 and pred_end >= 0)
-            timeseries = self.data[seq_start:seq_end, :].T
-            forecast = self.data[seq_end:pred_end, :].T
-
-            return timeseries, forecast, input_mask
+        return timeseries, forecast, input_mask
 
 
     def __len__(self):
-        if self.task_name == "imputation":
-            return (self.length_timeseries - self.seq_len) // self.data_stride_len + 1
-        elif self.task_name == "forecasting":
-            return (
-                self.length_timeseries - self.seq_len - self.forecast_horizon
-            ) // self.data_stride_len + 1
-        else:
-            raise ValueError("Unknown task name")
+        return (
+            self.length_timeseries - self.seq_len - self.forecast_horizon
+        ) // self.data_stride_len + 1
 
 
 
@@ -385,7 +372,7 @@ def upsample_timeseries(
     sampling_type: str = "pad",
     direction: str = "backward",
     **kwargs,
-) -> npt.NDArray:
+) -> (npt.NDArray, npt.NDArray):
     timeseries_len = len(timeseries)
     input_mask = np.ones(seq_len)
 
@@ -460,7 +447,9 @@ class MIMIC_mortality(torch.utils.data.Dataset):
                  dir: str = "/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/in-hospital-mortality",
                  equal_length: bool = False,
                  small_part: bool = True,
-                 ordinal: bool = False):
+                 ordinal: bool = False, keep_categorical: bool = False,
+                 seed: int = 0,
+                 normalize: bool = True):
         """
         Parameters
         ----------
@@ -477,6 +466,20 @@ class MIMIC_mortality(torch.utils.data.Dataset):
         self.equal_length = equal_length
         self.small_part = small_part
         self.ordinal = ordinal
+        self.seed = seed
+        self.keep_categorical = keep_categorical
+        self.normalize = normalize
+
+        self.load_size = None
+        if self.small_part:
+            if data_split == 'test':
+                split = 0.3
+            elif data_split == 'train':
+                split = 0.6
+            else:
+                split = 0.1
+            # self.load_size = int((1000/0.6) * split)
+            self.load_size = int(1000 * split)  # NOTE: if this is too small, the data will be too similar
 
         self._read_data()
         self.filename = dir
@@ -490,6 +493,8 @@ class MIMIC_mortality(torch.utils.data.Dataset):
                                             listfile=os.path.join(self.dir,
                                                                     f'{self.data_split}_listfile.csv'),
                                             period_length=48.0)
+
+        reader.random_shuffle(self.seed)
 
         self.discretizer = Discretizer(timestep=1.0,
                                         store_masks=True,
@@ -508,8 +513,12 @@ class MIMIC_mortality(torch.utils.data.Dataset):
         normalizer_state = os.path.join(os.path.dirname(__file__), normalizer_state)
         self.normalizer.load_params(normalizer_state)
 
+
+        if not self.normalize:
+            self.normalizer = None
+
         # else:
-        self.raw = utils.load_data(reader, self.discretizer, self.normalizer, self.small_part, return_names=True)
+        self.raw = utils.load_data(reader, self.discretizer, self.normalizer, return_names=True, load_size=self.load_size)
 
         self.data_indices = [i for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
         self.columns = [x for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
@@ -524,6 +533,10 @@ class MIMIC_mortality(torch.utils.data.Dataset):
             mylist =[x.split('->')[0] for x in self.columns]
             unique = [x for x in mylist if x not in used and (used.add(x) or True)]
             vars = [x.split('->')[0] for x in self.columns]
+
+            # self.categories = {i: sum([True for v in vars if v == x]) for i, x in enumerate(unique)}
+            # self.categories = {k: v for k, v in self.categories if v > 1}
+
 
             for i in range(len(self.raw['data'][0])):
                 row = []
@@ -541,14 +554,16 @@ class MIMIC_mortality(torch.utils.data.Dataset):
             need_normalize = [x.split('->')[0] for i, x in enumerate(self.columns) if len(x.split('->'))>1 ]
             idxs = set([i for i, x in enumerate(unique) if x in need_normalize])
 
-            # normalize
-            for i in range(len(self.ordinal_data)):
-                for j in idxs:
-                    self.ordinal_data[i][:, j] = (self.ordinal_data[i][:, j] - np.mean(all[:, j])) / np.std(all[:, j])
+            if not self.keep_categorical:
+                # normalize
+                for i, d in enumerate(self.ordinal_data):
+                    for j in idxs:
+                        if np.std(all[:, j]) != 0:
+                            self.ordinal_data[i][:, j] = (d[:, j] - np.mean(all[:, j])) / np.std(all[:, j])
 
             self.raw['data'] = list(self.raw['data'])
             self.raw['data'][0] = self.ordinal_data
-        
+
         self.n_channels = 18
 
 
@@ -606,6 +621,125 @@ class MIMIC_mortality(torch.utils.data.Dataset):
 
 
 
+class MIMIC_mortality_STraTS(MIMIC_mortality):
+
+    def __init__(self,
+                 train_batch_size: int,
+                 dir: str = "/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/in-hospital-mortality",
+                 equal_length: bool = False,
+                 small_part: bool = True,
+                 ordinal: bool = False, keep_categorical: bool = False,
+                 seed: int = 0,
+                 normalize: bool = True,):
+        """
+        Parameters
+        ----------
+        data_split : str
+            Split of the dataset, 'train', 'val' or 'test'.
+        """
+
+        super().__init__('train', dir, equal_length, small_part, ordinal, seed, normalize)
+        train_data = self.raw['data']
+
+        super().__init__('val', dir, equal_length, small_part, ordinal, seed, normalize)
+        val_data = self.raw['data']
+
+        super().__init__('test', dir, equal_length, small_part, ordinal, seed, normalize)
+        test_data = self.raw['data']
+
+        self.raw = {'data': [train_data[0] + val_data[0] + test_data[0],
+                             train_data[1] + val_data[1] + test_data[1]],}
+
+        # NOTE:
+        # did strats normalize categorical variables?
+        #   - they just normalized the ordinal values
+        # how did they pad
+        #   - pad at the end
+
+        self.splits = {'train': np.arange(0, len(train_data[0])),
+                       'val': np.arange(len(train_data[0]), len(train_data[0]) + len(val_data[0])),
+                       'test': np.arange(len(train_data[0]) + len(val_data[0]), len(train_data[0]) + len(val_data[0]) + len(test_data[0]))}
+        self.splits['eval_train'] = self.splits['train'][:int(len(train_data[0])*0.4)]  # if too small, all in same class
+
+        from baselines.STraTS.src.utils import CycleIndex
+        self.train_cycler = CycleIndex(self.splits['train'], train_batch_size)
+
+
+
+    def get_batch(self, idx=None):
+        # for strats
+        # TODO: remove first padding by normal values?
+        # TODO: range of normalized timestamps dont match strats, how did they do it?
+        #   - data['minute']/max_minute*2-1, so it is normalized to [-1, 1]
+
+        max_len = 880  # TODO: use 512?
+
+        values_list = []
+        times_list = []
+        varis_list = []
+        obs_mask_list = []
+        label_list = []
+
+        if idx is None:
+            idx = self.train_cycler.get_batch_ind()
+
+        for i in idx:
+            timeseries, input_mask, label = self[i]
+            timeseries = timeseries.T
+
+            # remove padding from timeseries
+            variables = timeseries[input_mask == 1][:, 1:]
+            variables_df = pd.DataFrame(variables)
+            # remove duplicates for each variable
+            for var in variables_df.columns:
+                variables_df[var] = variables_df[var].drop_duplicates()
+
+            # flatten the dataframe, ignore nan
+            variables = variables_df.values.flatten()
+            variables = variables[~np.isnan(variables)]
+
+            times = timeseries[input_mask == 1][:, 0]
+            # repeat by number of non-nan values of each row
+            times = np.repeat(times, variables_df.count(axis=1).values)
+
+            # var codes
+            varis = variables_df.copy()
+            varis[~np.isnan(varis)] = 1
+            varis *= varis.columns
+            varis = varis.values.flatten()
+            varis = varis[~np.isnan(varis)].astype('int32')
+
+            # mask
+            obs_mask = np.ones(max_len)
+            obs_mask[len(times):] = 0
+            times = np.pad(times, (0, max_len - len(times)))
+            varis = np.pad(varis, (0, max_len - len(varis)))
+            values = np.pad(variables, (0, max_len - len(variables)))
+
+            values_list.append(values)
+            times_list.append(times)
+            varis_list.append(varis)
+            obs_mask_list.append(obs_mask)
+            label_list.append(label)
+
+        values = torch.tensor(np.stack(values_list)).to(torch.float32)
+        times = torch.tensor(np.stack(times_list)).to(torch.float32)
+        varis = torch.tensor(np.stack(varis_list)).to(torch.int32)
+        obs_mask = torch.tensor(np.stack(obs_mask_list)).to(torch.float32)
+        label = torch.tensor(np.stack(label_list)).to(torch.float32)
+
+        # place holder for demo
+        demo = torch.zeros_like(values).to(torch.float32)
+
+        return {'values':values, 'times':times, 'varis':varis,
+                'obs_mask':obs_mask, 'demo':demo,
+                'labels':label}
+
+
+
+
+
+
 class MIMIC_phenotyping(torch.utils.data.Dataset):
 
     def __init__(self,
@@ -613,7 +747,10 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
                  dir: str = "/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/phenotyping",
                  equal_length: bool = False,
                  small_part: bool = True,
-                 ordinal: bool = False):
+                 ordinal: bool = False,
+                 seed: int = 0,
+                 normalize: bool = True,
+                 ):
         """
         Parameters
         ----------
@@ -630,9 +767,24 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
         self.equal_length = equal_length
         self.small_part = small_part
         self.ordinal = ordinal
+        self.seed = seed
+        self.normalize = normalize
+
+        self.load_size = None
+        if self.small_part:
+            if data_split == 'test':
+                split = 0.3
+            elif data_split == 'train':
+                split = 0.6
+            else:
+                split = 0.1
+            # self.load_size = int((1000/0.6) * split)
+            self.load_size = int(1000 * split)
 
         self._read_data()
         self.filename = dir
+
+        self.is_strats = False
 
 
     def _read_data(self):
@@ -642,6 +794,7 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
         reader = PhenotypingReader(dataset_dir=os.path.join(self.dir, folder),
                                             listfile=os.path.join(self.dir,
                                                                     f'{self.data_split}_listfile.csv'),)
+        reader.random_shuffle(self.seed)
 
         self.discretizer = Discretizer(timestep=1.0,
                                         store_masks=True,
@@ -660,12 +813,17 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
         normalizer_state = os.path.join(os.path.dirname(__file__), normalizer_state)
         self.normalizer.load_params(normalizer_state)
 
-        self.raw = utils.load_data(reader, self.discretizer, self.normalizer, self.small_part, return_names=True)
+
+        if not self.normalize:
+            self.normalizer = None
+
+        self.raw = utils.load_data(reader, self.discretizer, self.normalizer, return_names=True, load_size=self.load_size)
 
         self.data_indices = [i for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
         self.columns = [x for (i, x) in enumerate(self.discretizer_header) if x.find("mask") == -1]
         self.n_channels = 60
         self.num_classes = 25
+
 
         # one hot to ordinal
         if self.ordinal:
@@ -693,13 +851,14 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
             idxs = set([i for i, x in enumerate(unique) if x in need_normalize])
 
             # normalize
-            for i in range(len(self.ordinal_data)):
+            for i, d in enumerate(self.ordinal_data):
                 for j in idxs:
-                    self.ordinal_data[i][:, j] = (self.ordinal_data[i][:, j] - np.mean(all[:, j])) / np.std(all[:, j])
+                    if np.std(all[:, j]) != 0:
+                        self.ordinal_data[i][:, j] = (d[:, j] - np.mean(all[:, j])) / np.std(all[:, j])
 
             self.raw['data'] = list(self.raw['data'])
             self.raw['data'][0] = self.ordinal_data
-        
+
         self.n_channels = 18
 
 
@@ -720,6 +879,11 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
             column_mapping = [x.split('->')[0] for x in self.columns]
             ids = [self.discretizer._channel_to_id[x] for x in column_mapping]
             mask = mask[:, ids]
+
+
+        if self.is_strats:
+            return timeseries.T, None, label
+
 
         timeseries_len = timeseries.shape[0]
         if timeseries_len <= self.seq_len:
@@ -748,13 +912,520 @@ class MIMIC_phenotyping(torch.utils.data.Dataset):
 
         # input_mask = np.repeat(input_mask.reshape(-1, 1), timeseries.shape[1], axis=1)
 
-        # return timeseries.T, input_mask.T, label
         return timeseries.T, input_mask, label
 
 
     def __len__(self):
         return len(self.raw['data'][0])
 
+
+
+
+
+
+class MIMIC_phenotyping_STraTS(MIMIC_phenotyping):
+
+    def __init__(self,
+                 train_batch_size: int,
+                 dir: str = "/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/phenotyping",
+                 equal_length: bool = False,
+                 small_part: bool = True,
+                 ordinal: bool = False,
+                 seed: int = 0,
+                 normalize: bool = True,):
+        """
+        Parameters
+        ----------
+        data_split : str
+            Split of the dataset, 'train', 'val' or 'test'.
+        """
+
+        self.is_strats = True
+
+        super().__init__('train', dir, equal_length, small_part, ordinal, seed, normalize)
+        train_data = self.raw['data']
+
+        super().__init__('val', dir, equal_length, small_part, ordinal, seed, normalize)
+        val_data = self.raw['data']
+
+        super().__init__('test', dir, equal_length, small_part, ordinal, seed, normalize)
+        test_data = self.raw['data']
+
+        self.raw = {'data': [train_data[0] + val_data[0] + test_data[0],
+                             train_data[1] + val_data[1] + test_data[1]],}
+
+        # TODO:
+        # did strats normalize categorical variables?
+        # how did they pad
+
+        self.splits = {'train': np.arange(0, len(train_data[0])),
+                       'val': np.arange(len(train_data[0]), len(train_data[0]) + len(val_data[0])),
+                       'test': np.arange(len(train_data[0]) + len(val_data[0]), len(train_data[0]) + len(val_data[0]) + len(test_data[0]))}
+        self.splits['eval_train'] = self.splits['train'][:int(len(train_data[0])*0.4)]  # if too small, all in same class
+
+        from baselines.STraTS.src.utils import CycleIndex
+        self.train_cycler = CycleIndex(self.splits['train'], train_batch_size)
+
+
+
+    def get_batch(self, idx=None):
+        # for strats
+        # TODO: remove first padding by normal values?
+        # TODO: range of normalized timestamps dont match strats, how did they do it?
+        max_len = 880  # TODO: use 512?
+
+        values_list = []
+        times_list = []
+        varis_list = []
+        obs_mask_list = []
+        label_list = []
+
+        if idx is None:
+            idx = self.train_cycler.get_batch_ind()
+
+
+        for i in idx:
+            timeseries, input_mask, label = self[i]
+
+            timeseries = timeseries.T
+
+            # remove padding from timeseries
+            variables = timeseries[input_mask == 1][:, 1:]
+            variables_df = pd.DataFrame(variables)
+            # remove duplicates for each variable
+            for var in variables_df.columns:
+                variables_df[var] = variables_df[var].drop_duplicates()
+
+            # flatten the dataframe, ignore nan
+            variables = variables_df.values.flatten()
+            variables = variables[~np.isnan(variables)]
+
+            times = timeseries[input_mask == 1][:, 0]
+            # repeat by number of non-nan values of each row
+            times = np.repeat(times, variables_df.count(axis=1).values)
+
+            # var codes
+            varis = variables_df.copy()
+            varis[~np.isnan(varis)] = 1
+            varis *= varis.columns
+            varis = varis.values.flatten()
+            varis = varis[~np.isnan(varis)].astype('int32')
+
+            # mask
+            obs_mask = np.ones(max_len)
+            obs_mask[len(times):] = 0
+            times = np.pad(times, (0, max_len - len(times)))
+            varis = np.pad(varis, (0, max_len - len(varis)))
+            values = np.pad(variables, (0, max_len - len(variables)))
+
+            values_list.append(values)
+            times_list.append(times)
+            varis_list.append(varis)
+            obs_mask_list.append(obs_mask)
+            label_list.append(label)
+
+        values = torch.tensor(np.stack(values_list)).to(torch.float32)
+        times = torch.tensor(np.stack(times_list)).to(torch.float32)
+        varis = torch.tensor(np.stack(varis_list)).to(torch.int32)
+        obs_mask = torch.tensor(np.stack(obs_mask_list)).to(torch.float32)
+        label = torch.tensor(np.stack(label_list)).to(torch.float32)
+
+        # place holder for demo
+        demo = torch.zeros_like(values).to(torch.float32)
+
+        return {'values':values, 'times':times, 'varis':varis,
+                'obs_mask':obs_mask, 'demo':demo,
+                'labels':label}
+
+
+
+
+
+class MIMIC_pretrain_pheno_STraTS(MIMIC_phenotyping):
+
+    def __init__(self,
+                 train_batch_size: int,
+                 dir: str = "/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/phenotyping",
+                 equal_length: bool = False,
+                 small_part: bool = True,
+                 ordinal: bool = False,
+                 seed: int = 0,
+                 normalize: bool = True,):
+        """
+        Parameters
+        ----------
+        data_split : str
+            Split of the dataset, 'train', 'val' or 'test'.
+        """
+
+        super().__init__('train', dir, equal_length, small_part, ordinal, seed, normalize)
+        train_data = self.raw['data']
+
+        super().__init__('val', dir, equal_length, small_part, ordinal, seed, normalize)
+        val_data = self.raw['data']
+
+        self.raw = {'data': [train_data[0] + val_data[0], train_data[1] + val_data[1]],}
+
+        self.timestamps = [d[:, 0]*self.normalizer._stds[0] + self.normalizer._means[0] for d in self.raw['data'][0]]
+        # TODO: change to 12
+        self.timestamps_12hrs = [x[x>=12] for x in self.timestamps] # atleast 12 hrs
+
+        # TODO:
+        # did strats normalize categorical variables?
+        # how did they pad
+
+        self.splits = {'train': np.arange(0, len(train_data[0])),
+                       'val': np.arange(len(train_data[0]), len(train_data[0]) + len(val_data[0])),}
+
+        from baselines.STraTS.src.utils import CycleIndex
+        self.train_cycler = CycleIndex(self.splits['train'], train_batch_size)
+
+        self.is_strats = True
+
+
+    def get_batch(self, idx=None):
+        # for strats
+        # TODO: remove first padding by normal values?
+        # TODO: range of normalized timestamps dont match strats, how did they do it?
+        max_len = 880  # TODO: use 512?
+
+        values_list = []
+        times_list = []
+        varis_list = []
+        obs_mask_list = []
+        label_list = []
+
+        if idx is None:
+            idx = self.train_cycler.get_batch_ind()
+
+        forecast_values_list = []
+        forecast_mask_list = []
+
+        for _, i in enumerate(idx):
+            # timeseries, _, _ = self[i]
+            timeseries = self.raw['data'][0][i]
+        
+            # if len(self.timestamps_12hrs[i]) == 0:
+            #     continue
+
+
+            # remove padding from timeseries
+            # variables = timeseries[input_mask == 1][:, 1:]
+            variables = timeseries[:, 1:]
+            variables_df = pd.DataFrame(variables)
+            # remove duplicates for each variable
+            for var in variables_df.columns:
+                variables_df[var] = variables_df[var].drop_duplicates()
+
+            # flatten the dataframe, ignore nan
+            variables = variables_df.values.flatten()
+            variables = variables[~np.isnan(variables)]
+
+            # times = timeseries[input_mask == 1][:, 0]
+            times = timeseries[:, 0]
+            # repeat by number of non-nan values of each row
+            times = np.repeat(times, variables_df.count(axis=1).values)
+
+            # var codes
+            varis = variables_df.copy()
+            varis[~np.isnan(varis)] = 1
+            varis *= varis.columns
+            varis = varis.values.flatten()
+            varis = varis[~np.isnan(varis)].astype('int32')
+
+
+        # self.timestamps = [d[:, 0]*self.normalizer._stds[0] + self.normalizer._means[0] for d in self.raw['data'][0]]
+
+            if len(times[times >= (12-self.normalizer._means[0])/self.normalizer._stds[0]]) == 0:
+                continue
+
+            t1 = np.random.choice(times[times > (12-self.normalizer._means[0])/self.normalizer._stds[0]]) # start of prediction window
+            t1_ = t1 * self.normalizer._stds[0] + self.normalizer._means[0]
+
+            t2 = (t1_+2-self.normalizer._means[0])/self.normalizer._stds[0]
+            t0 = max((0-self.normalizer._means[0])/self.normalizer._stds[0],(t1_-24-self.normalizer._means[0])/self.normalizer._stds[0])
+
+            t2 = times[times < t2][-1]
+            t0 = times[times > t0][0]
+
+            t1_idx = np.where(times == t1)[0][-1]
+            t0_idx = np.where(times == t0)[0][0]
+            t2_idx = np.where(times == t2)[0][-1]
+
+            # ts = times * self.normalizer._stds[0] + self.normalizer._means[0]
+            # # t1 = np.random.choice(self.timestamps_12hrs[i]) # start of prediction window
+            # if len(ts[ts > 12]) == 0:
+            #     continue
+
+            # t1 = np.random.choice(ts[ts > 12]) # start of prediction window
+            # times = self.timestamps[i]
+
+            # max window 24hrs
+            # t2 = t1+2
+            # t0 = max(0,t1-24)
+            # # find the index of t0, t1, and t2
+            # # t2 = times[times < t2][-1]
+            # # t0 = times[times > t0][0]
+
+            # t2 = ts[ts < t2][-1]
+            # t0 = ts[ts > t0][0]
+
+            # t1 = (t1 - self.normalizer._means[0]) / self.normalizer._stds[0]
+            # t2 = (t2 - self.normalizer._means[0]) / self.normalizer._stds[0]
+            # t0 = (t0 - self.normalizer._means[0]) / self.normalizer._stds[0]
+
+
+
+            # try: # TODO
+            #     t1_idx = np.where(times == t1)[0][-1]
+            #     t0_idx = np.where(times == t0)[0][0]
+            #     t2_idx = np.where(times == t2)[0][-1]
+            # except:
+            #     continue
+
+            # TODO: if duplicate, take the last one
+            forecast_vals = variables[t1_idx+1:t2_idx+1]
+            forecast_vars = varis[t1_idx+1:t2_idx+1]
+
+            forecast_values = torch.zeros(self.n_channels)
+            forecast_values[forecast_vars] = torch.tensor(forecast_vals).to(torch.float32)
+            forecast_mask = torch.zeros(self.n_channels).to(torch.float32)
+            forecast_mask[forecast_vars] = 1
+
+            values = variables[t0_idx:t1_idx+1]
+            times = times[t0_idx:t1_idx+1]
+            varis = varis[t0_idx:t1_idx+1]
+
+            # mask
+            obs_mask = np.ones(max_len)
+            if len(times) < max_len:
+                obs_mask[len(times):] = 0
+                times = np.pad(times, (0, max_len - len(times)))
+                varis = np.pad(varis, (0, max_len - len(varis)))
+                values = np.pad(values, (0, max_len - len(values)))
+            else:
+                # TODO: tuncate the other direction?
+                obs_mask = np.ones_like(times)
+                times = times[:max_len]
+                varis = varis[:max_len]
+                values = values[:max_len]
+                
+
+            values_list.append(values)
+            times_list.append(times)
+            varis_list.append(varis)
+            obs_mask_list.append(obs_mask)
+            forecast_values_list.append(forecast_values)
+            forecast_mask_list.append(forecast_mask)
+
+        values = torch.tensor(np.stack(values_list)).to(torch.float32)
+        times = torch.tensor(np.stack(times_list)).to(torch.float32)
+        varis = torch.tensor(np.stack(varis_list)).to(torch.int32)
+        obs_mask = torch.tensor(np.stack(obs_mask_list)).to(torch.float32)
+        forecast_values_list = torch.stack(forecast_values_list)
+        forecast_mask_list = torch.stack(forecast_mask_list)
+
+
+        return {'values':values, 'times':times, 'varis':varis,
+                'obs_mask':obs_mask,
+                'demo':torch.zeros_like(values).to(torch.float32),
+                'forecast_values':forecast_values,
+                'forecast_mask':forecast_mask}
+
+
+
+
+
+class MIMIC_pretrain_mortality_STraTS(MIMIC_mortality):
+
+    def __init__(self,
+                 train_batch_size: int,
+                 dir: str = "/zfsauton2/home/mingzhul/time-series-prompt/mimic3_benchmarks/processed/in-hospital-mortality",
+                 equal_length: bool = False,
+                 small_part: bool = True,
+                 ordinal: bool = False,
+                 seed: int = 0,
+                 normalize: bool = True,):
+        """
+        Parameters
+        ----------
+        data_split : str
+            Split of the dataset, 'train', 'val' or 'test'.
+        """
+
+        super().__init__('train', dir, equal_length, small_part, ordinal, seed, normalize)
+        train_data = self.raw['data']
+
+        super().__init__('val', dir, equal_length, small_part, ordinal, seed, normalize)
+        val_data = self.raw['data']
+
+        self.raw = {'data': [train_data[0] + val_data[0], train_data[1] + val_data[1]],}
+
+        self.timestamps = [d[:, 0]*self.normalizer._stds[0] + self.normalizer._means[0] for d in self.raw['data'][0]]
+        # TODO: change to 12
+        self.timestamps_12hrs = [x[x>=12] for x in self.timestamps] # atleast 12 hrs
+
+        # TODO:
+        # did strats normalize categorical variables?
+        # how did they pad
+
+        self.splits = {'train': np.arange(0, len(train_data[0])),
+                       'val': np.arange(len(train_data[0]), len(train_data[0]) + len(val_data[0])),}
+
+        from baselines.STraTS.src.utils import CycleIndex
+        self.train_cycler = CycleIndex(self.splits['train'], train_batch_size)
+
+        self.is_strats = True
+
+
+    def get_batch(self, idx=None):
+        # for strats
+        # TODO: remove first padding by normal values?
+        # TODO: range of normalized timestamps dont match strats, how did they do it?
+        max_len = 880  # TODO: use 512?
+
+        values_list = []
+        times_list = []
+        varis_list = []
+        obs_mask_list = []
+        label_list = []
+
+        if idx is None:
+            idx = self.train_cycler.get_batch_ind()
+
+        forecast_values_list = []
+        forecast_mask_list = []
+
+        for _, i in enumerate(idx):
+            # timeseries, _, _ = self[i]
+            timeseries = self.raw['data'][0][i]
+        
+            # if len(self.timestamps_12hrs[i]) == 0:
+            #     continue
+
+
+            # remove padding from timeseries
+            # variables = timeseries[input_mask == 1][:, 1:]
+            variables = timeseries[:, 1:]
+            variables_df = pd.DataFrame(variables)
+            # remove duplicates for each variable
+            for var in variables_df.columns:
+                variables_df[var] = variables_df[var].drop_duplicates()
+
+            # flatten the dataframe, ignore nan
+            variables = variables_df.values.flatten()
+            variables = variables[~np.isnan(variables)]
+
+            # times = timeseries[input_mask == 1][:, 0]
+            times = timeseries[:, 0]
+            # repeat by number of non-nan values of each row
+            times = np.repeat(times, variables_df.count(axis=1).values)
+
+            # var codes
+            varis = variables_df.copy()
+            varis[~np.isnan(varis)] = 1
+            varis *= varis.columns
+            varis = varis.values.flatten()
+            varis = varis[~np.isnan(varis)].astype('int32')
+
+
+        # self.timestamps = [d[:, 0]*self.normalizer._stds[0] + self.normalizer._means[0] for d in self.raw['data'][0]]
+
+            if len(times[times >= (12-self.normalizer._means[0])/self.normalizer._stds[0]]) == 0:
+                continue
+
+            t1 = np.random.choice(times[times > (12-self.normalizer._means[0])/self.normalizer._stds[0]]) # start of prediction window
+            t1_ = t1 * self.normalizer._stds[0] + self.normalizer._means[0]
+
+            t2 = (t1_+2-self.normalizer._means[0])/self.normalizer._stds[0]
+            t0 = max((0-self.normalizer._means[0])/self.normalizer._stds[0],(t1_-24-self.normalizer._means[0])/self.normalizer._stds[0])
+
+            t2 = times[times < t2][-1]
+            t0 = times[times > t0][0]
+
+            t1_idx = np.where(times == t1)[0][-1]
+            t0_idx = np.where(times == t0)[0][0]
+            t2_idx = np.where(times == t2)[0][-1]
+
+            # ts = times * self.normalizer._stds[0] + self.normalizer._means[0]
+            # # t1 = np.random.choice(self.timestamps_12hrs[i]) # start of prediction window
+            # if len(ts[ts > 12]) == 0:
+            #     continue
+
+            # t1 = np.random.choice(ts[ts > 12]) # start of prediction window
+            # times = self.timestamps[i]
+
+            # max window 24hrs
+            # t2 = t1+2
+            # t0 = max(0,t1-24)
+            # # find the index of t0, t1, and t2
+            # # t2 = times[times < t2][-1]
+            # # t0 = times[times > t0][0]
+
+            # t2 = ts[ts < t2][-1]
+            # t0 = ts[ts > t0][0]
+
+            # t1 = (t1 - self.normalizer._means[0]) / self.normalizer._stds[0]
+            # t2 = (t2 - self.normalizer._means[0]) / self.normalizer._stds[0]
+            # t0 = (t0 - self.normalizer._means[0]) / self.normalizer._stds[0]
+
+
+
+            # try: # TODO
+            #     t1_idx = np.where(times == t1)[0][-1]
+            #     t0_idx = np.where(times == t0)[0][0]
+            #     t2_idx = np.where(times == t2)[0][-1]
+            # except:
+            #     continue
+
+            # TODO: if duplicate, take the last one
+            forecast_vals = variables[t1_idx+1:t2_idx+1]
+            forecast_vars = varis[t1_idx+1:t2_idx+1]
+
+            forecast_values = torch.zeros(self.n_channels)
+            forecast_values[forecast_vars] = torch.tensor(forecast_vals).to(torch.float32)
+            forecast_mask = torch.zeros(self.n_channels).to(torch.float32)
+            forecast_mask[forecast_vars] = 1
+
+            values = variables[t0_idx:t1_idx+1]
+            times = times[t0_idx:t1_idx+1]
+            varis = varis[t0_idx:t1_idx+1]
+
+            # mask
+            obs_mask = np.ones(max_len)
+            if len(times) < max_len:
+                obs_mask[len(times):] = 0
+                times = np.pad(times, (0, max_len - len(times)))
+                varis = np.pad(varis, (0, max_len - len(varis)))
+                values = np.pad(values, (0, max_len - len(values)))
+            else:
+                # TODO: tuncate the other direction?
+                obs_mask = np.ones_like(times)
+                times = times[:max_len]
+                varis = varis[:max_len]
+                values = values[:max_len]
+                
+
+            values_list.append(values)
+            times_list.append(times)
+            varis_list.append(varis)
+            obs_mask_list.append(obs_mask)
+            forecast_values_list.append(forecast_values)
+            forecast_mask_list.append(forecast_mask)
+
+        values = torch.tensor(np.stack(values_list)).to(torch.float32)
+        times = torch.tensor(np.stack(times_list)).to(torch.float32)
+        varis = torch.tensor(np.stack(varis_list)).to(torch.int32)
+        obs_mask = torch.tensor(np.stack(obs_mask_list)).to(torch.float32)
+        forecast_values_list = torch.stack(forecast_values_list)
+        forecast_mask_list = torch.stack(forecast_mask_list)
+
+
+        return {'values':values, 'times':times, 'varis':varis,
+                'obs_mask':obs_mask,
+                'demo':torch.zeros_like(values).to(torch.float32),
+                'forecast_values':forecast_values,
+                'forecast_mask':forecast_mask}
 
 
 

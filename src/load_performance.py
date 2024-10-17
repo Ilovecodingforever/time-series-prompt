@@ -274,10 +274,9 @@ def print_stuff(files):
 
 def bootstrap():
     dirs = [
-        ('forecasting_long', 'performance/finetune/forecasting_long/ETTh1/96/2024-09-14 12:29:12.019549', 'autoformer_ETTh1.csv.pkl'),
-        ('forecasting_long', 'performance/finetune/forecasting_long/ETTh2/96/2024-09-14 12:29:12.019549', 'autoformer_ETTh2.csv.pkl'),
-        ('forecasting_long', 'performance/finetune/forecasting_long/exchange_rate/96/2024-09-14 12:29:12.019549', 'autoformer_exchange_rate.csv.pkl'),
-        ('forecasting_long', 'performance/finetune/forecasting_long/national_illness/60/2024-09-14 12:29:12.019549', 'autoformer_national_illness.csv.pkl'),
+        # ('forecasting', 'performance/moment/prompttune_vanilla_mlp/forecasting/national_illness/60/2024-10-08 20:16:38.714952', 'autoformer_national_illness.csv.pkl'),
+        ('classification', 'performance/gpt4ts/focal_loss_prompttune_attention_mlp/mimic/mortality/2024-10-17 01:06:55.469442', 'processed_in-hospital-mortality.pkl'),
+        # ('classification', 'performance/moment/finetune/mimic/phenotyping/2024-10-16 22:57:25.920332', 'processed_phenotyping.pkl'),
     ]
 
 
@@ -285,10 +284,10 @@ def bootstrap():
         performances = []
         for seed in os.listdir(dir):
             try:
-                with open(f"{dir}/{seed}/test/0/{task}/{filename}", "rb") as f:
+                with open(f"{dir}/{seed}/test/9/{task}/{filename}", "rb") as f:
                     performance = pickle.load(f)
                     # print(performance)
-                performances.append(performance[task])
+                performances.append(performance)
             except Exception as e:
                 print(e)
                 
